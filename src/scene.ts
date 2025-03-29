@@ -7,6 +7,18 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
+// --- Audio Setup ---
+const backgroundMusic = new Audio('/Interstellar.mp3');
+backgroundMusic.loop = true;
+backgroundMusic.volume = 0.1; // Set initial volume to 30% to make room for sound effects
+
+// Sound effects
+const starCatchSound = new Audio('/star-catch.mp3');
+starCatchSound.volume = 0.3;
+
+const rivalCollisionSound = new Audio('/rival-collision.mp3');
+rivalCollisionSound.volume = 0.3;
+
 // --- CONFIGURATION (Keep all config constants) ---
 const PARTICLE_COUNT = 4000;
 const PARTICLE_SPREAD = 90;
@@ -522,12 +534,21 @@ function createDamageOverlay() {
   overlay.style.right = '0';
   overlay.style.width = '100%';
   overlay.style.height = '100%';
-  overlay.style.border = '4px solid #ff0000';
+  overlay.style.border = '2px solid #ff0000';
   overlay.style.opacity = '0';
   overlay.style.transition = 'opacity 0.2s ease-out';
   overlay.style.pointerEvents = 'none';
   overlay.style.zIndex = '1000';
-  overlay.style.boxShadow = '0 0 20px #ff0000';
+  overlay.style.boxShadow = `
+    0 0 10px #ff0000,
+    0 0 20px #ff0000,
+    0 0 30px #ff0000,
+    0 0 40px #ff0000,
+    inset 0 0 10px #ff0000,
+    inset 0 0 20px #ff0000,
+    inset 0 0 30px #ff0000,
+    inset 0 0 40px #ff0000
+  `;
   document.body.appendChild(overlay);
   return overlay;
 }
@@ -594,6 +615,12 @@ function checkCollisions() {
         // Trigger catch if either condition is met with more forgiving checks
         if (isPlayerInCueBorder || isWithinCollisionRing) {
           score++;
+          
+          // Play star catch sound
+          starCatchSound.currentTime = 0;
+          starCatchSound.play().catch(error => {
+            console.warn('Could not play star catch sound:', error);
+          });
           
           // Check if we should increase speed and mass
           if (score - lastSpeedIncreaseScore >= SPEED_INCREASE_INTERVAL) {
@@ -685,6 +712,12 @@ function checkCollisions() {
         
         // Check for collision with rival black hole
         if (distanceSq <= maxCollisionDistSq * 1.2) {
+          // Play rival collision sound
+          rivalCollisionSound.currentTime = 0;
+          rivalCollisionSound.play().catch(error => {
+            console.warn('Could not play rival collision sound:', error);
+          });
+          
           // Reduce player's mass
           blackHoleMass = Math.max(0, blackHoleMass - RIVAL_BLACK_HOLE_DAMAGE);
           
@@ -901,6 +934,10 @@ window.addEventListener('resize', () => {
 
 // --- Start Game ---
 createUI();
+// Start background music
+backgroundMusic.play().catch(error => {
+  console.warn('Could not play background music:', error);
+});
 // Spawn initial stars
 for (let i = 0; i < 3; i++) {
   spawnStar();
@@ -910,6 +947,14 @@ animate();
 // --- Cleanup Shared Resources ---
 window.addEventListener('beforeunload', () => {
   console.log("Disposing shared resources...");
+  // Stop and cleanup audio
+  backgroundMusic.pause();
+  backgroundMusic.currentTime = 0;
+  starCatchSound.pause();
+  starCatchSound.currentTime = 0;
+  rivalCollisionSound.pause();
+  rivalCollisionSound.currentTime = 0;
+  
   cueBorderPlaneGeometry.dispose();
   cueBorderEdgesGeometry.dispose();
   cueBorderLineMaterial.dispose();
