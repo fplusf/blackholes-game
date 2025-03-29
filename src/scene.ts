@@ -34,11 +34,11 @@ const STAR_INNER_RADIUS = STAR_OUTER_RADIUS * 0.4;
 const STAR_POINTS = 4;
 const BLACK_HOLE_MOVEMENT_BOUNDS_X = 7;
 const BLACK_HOLE_MOVEMENT_BOUNDS_Y = 3.5;
-const BASE_GAME_SPEED = 25.0; // Increased from 18.0 to 25.0 for faster starting speed
+const BASE_GAME_SPEED = 25.0;
 const SLOW_MO_FACTOR = 0.2;
-const SPEED_INCREASE_INTERVAL = 10; // Number of stars needed to trigger speed increase
-const SPEED_INCREASE_AMOUNT = 3.0; // Amount to increase speed by
-const MAX_GAME_SPEED = 45.0; // Maximum speed cap
+const SPEED_INCREASE_INTERVAL = 10;
+const SPEED_INCREASE_AMOUNT = 3.0;
+const MAX_GAME_SPEED = 45.0;
 const SPAWN_DISTANCE_Z = -80;
 const CLEANUP_DISTANCE_Z = 12;
 const COLLISION_THRESHOLD_XY_FACTOR = 0.8;
@@ -51,7 +51,7 @@ const CUE_BORDER_MAX_SCALE = 8.0;
 const CUE_BORDER_MAX_OFFSET = STAR_OUTER_RADIUS * 0.5;
 const CUE_BORDER_FADE_START_Z = -20.0;
 const CUE_BORDER_FADE_END_Z = -5.0;
-const COLLISION_RING_FORGIVENESS = 0.4; // Added to make collision detection more forgiving
+const COLLISION_RING_FORGIVENESS = 0.4;
 
 // --- Rival Black Hole Constants ---
 const RIVAL_BLACK_HOLE_COUNT = 2; // Maximum number of rivals
@@ -78,6 +78,21 @@ const DAMAGE_FLASH_COLOR = new THREE.Color(0xff0000); // Red Flash for damage
 const STAR_COLOR = new THREE.Color(0xffffff);
 const BACKGROUND_COLOR = new THREE.Color(0x000000);
 const FOG_COLOR = BACKGROUND_COLOR;
+
+// --- Mobile Scaling ---
+const MOBILE_BREAKPOINT = 768;
+const MOBILE_SCALE_FACTOR = 0.8;
+const isMobile = window.innerWidth <= MOBILE_BREAKPOINT;
+
+const EFFECTIVE_BLACK_HOLE_PLANE_SIZE =
+  BLACK_HOLE_PLANE_SIZE * (isMobile ? MOBILE_SCALE_FACTOR : 1);
+const EFFECTIVE_STAR_OUTER_RADIUS = STAR_OUTER_RADIUS * (isMobile ? MOBILE_SCALE_FACTOR : 1);
+const EFFECTIVE_STAR_INNER_RADIUS = STAR_INNER_RADIUS * (isMobile ? MOBILE_SCALE_FACTOR : 1);
+const EFFECTIVE_CUE_BORDER_BASE_SIZE = CUE_BORDER_BASE_SIZE * (isMobile ? MOBILE_SCALE_FACTOR : 1);
+const EFFECTIVE_COLLISION_CENTER_RADIUS =
+  BLACK_HOLE_COLLISION_CENTER_RADIUS * (isMobile ? MOBILE_SCALE_FACTOR : 1);
+const EFFECTIVE_COLLISION_RING_WIDTH =
+  BLACK_HOLE_COLLISION_RING_WIDTH * (isMobile ? MOBILE_SCALE_FACTOR : 1);
 
 // --- Game State ---
 let gameSpeed = BASE_GAME_SPEED;
@@ -106,7 +121,7 @@ function showHighScoreMessage() {
   messageContainer.style.transform = 'translate(-50%, -50%)';
   messageContainer.style.color = '#ffffff';
   messageContainer.style.fontFamily = 'Arial, sans-serif';
-  messageContainer.style.fontSize = '48px';
+  messageContainer.style.fontSize = isMobile ? '24px' : '48px'; // Make font smaller on mobile
   messageContainer.style.textAlign = 'center';
   messageContainer.style.zIndex = '1000';
   messageContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
@@ -244,20 +259,54 @@ composer.addPass(renderScene);
 composer.addPass(bloomPass);
 const ORIGINAL_BLOOM_STRENGTH = bloomPass.strength;
 
-// --- Mouse Tracking ---
+// --- Window Resize Handling ---
+window.addEventListener('resize', () => {
+  // Update sizes
+  sizes.width = window.innerWidth;
+  sizes.height = window.innerHeight;
+
+  // Update camera
+  camera.aspect = sizes.width / sizes.height;
+  camera.updateProjectionMatrix();
+
+  // Update renderer
+  renderer.setSize(sizes.width, sizes.height);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Ensure pixel ratio is updated
+
+  // Update composer
+  composer.setSize(sizes.width, sizes.height); // Ensure composer resolution matches
+});
+
+// --- Mouse and Touch Tracking ---
 const mousePosition = new THREE.Vector2();
 window.addEventListener('mousemove', (event) => {
   mousePosition.x = (event.clientX / sizes.width) * 2 - 1;
   mousePosition.y = -(event.clientY / sizes.height) * 2 + 1;
 });
 
+// Add touch event listener
+window.addEventListener(
+  'touchmove',
+  (event) => {
+    // Prevent default touch behavior (like scrolling)
+    event.preventDefault();
+
+    if (event.touches.length > 0) {
+      const touch = event.touches[0];
+      mousePosition.x = (touch.clientX / sizes.width) * 2 - 1;
+      mousePosition.y = -(touch.clientY / sizes.height) * 2 + 1;
+    }
+  },
+  { passive: false }
+); // Use { passive: false } to allow preventDefault
+
 // --- Game Objects ---
 const playerGroup = new THREE.Group();
 playerGroup.position.z = 0;
 scene.add(playerGroup);
 const blackHoleGeometry = new THREE.PlaneGeometry(
-  BLACK_HOLE_PLANE_SIZE,
-  BLACK_HOLE_PLANE_SIZE,
+  EFFECTIVE_BLACK_HOLE_PLANE_SIZE,
+  EFFECTIVE_BLACK_HOLE_PLANE_SIZE,
   32,
   32
 );
@@ -337,7 +386,11 @@ function createStarGeometry(
   return new THREE.ShapeGeometry(shape);
 }
 
-const starGeometry = createStarGeometry(STAR_OUTER_RADIUS, STAR_INNER_RADIUS, STAR_POINTS);
+const starGeometry = createStarGeometry(
+  EFFECTIVE_STAR_OUTER_RADIUS,
+  EFFECTIVE_STAR_INNER_RADIUS,
+  STAR_POINTS
+);
 const starMaterial = new THREE.MeshBasicMaterial({
   color: STAR_COLOR,
   transparent: true,
@@ -348,7 +401,10 @@ const starMaterial = new THREE.MeshBasicMaterial({
 });
 
 // --- Shared Cue Border Geometry & Material ---
-const cueBorderPlaneGeometry = new THREE.PlaneGeometry(CUE_BORDER_BASE_SIZE, CUE_BORDER_BASE_SIZE);
+const cueBorderPlaneGeometry = new THREE.PlaneGeometry(
+  EFFECTIVE_CUE_BORDER_BASE_SIZE,
+  EFFECTIVE_CUE_BORDER_BASE_SIZE
+);
 const cueBorderEdgesGeometry = new THREE.EdgesGeometry(cueBorderPlaneGeometry);
 const cueBorderLineMaterial = new THREE.LineBasicMaterial({
   color: CUE_BORDER_COLOR,
@@ -360,12 +416,13 @@ const cueBorderLineMaterial = new THREE.LineBasicMaterial({
 // --- UI Setup ---
 function createUI() {
   const uiContainer = document.createElement('div');
+  uiContainer.id = 'ui-container'; // Add an ID for easier targeting
   uiContainer.style.position = 'fixed';
   uiContainer.style.top = '20px';
   uiContainer.style.right = '20px';
   uiContainer.style.color = '#ffffff';
   uiContainer.style.fontFamily = 'Arial, sans-serif';
-  uiContainer.style.fontSize = '20px';
+  uiContainer.style.fontSize = '20px'; // Base font size
   uiContainer.style.textAlign = 'right';
   uiContainer.style.zIndex = '1000';
   uiContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
@@ -380,6 +437,7 @@ function createUI() {
   const highScoreElement = document.createElement('div');
   highScoreElement.id = 'high-score-display';
   highScoreElement.style.marginTop = '10px';
+  highScoreElement.style.fontSize = '16px'; // Base high score font size
 
   uiContainer.appendChild(scoreElement);
   uiContainer.appendChild(massElement);
@@ -388,11 +446,12 @@ function createUI() {
 
   // Create info icon
   const infoIcon = document.createElement('div');
+  infoIcon.id = 'info-icon'; // Add an ID for easier targeting
   infoIcon.innerHTML = 'ⓘ';
   infoIcon.style.position = 'fixed';
-  infoIcon.style.bottom = '20px';
-  infoIcon.style.right = '20px';
-  infoIcon.style.fontSize = '32px';
+  infoIcon.style.top = '20px';
+  infoIcon.style.left = '20px';
+  infoIcon.style.fontSize = '32px'; // Base icon font size
   infoIcon.style.color = '#ffffff';
   infoIcon.style.cursor = 'pointer';
   infoIcon.style.zIndex = '1000';
@@ -421,12 +480,12 @@ function createUI() {
   dialogContent.innerHTML = `
     <h2 style="margin-top: 0; color: #add8e6;">Black Hole Game</h2>
     <p>Welcome to the Black Hole Game! Guide your black hole through space, collect stars to grow stronger, and avoid rival black holes.</p>
-    
+
     <h3 style="color: #add8e6;">How to Play:</h3>
     <ul style="text-align: left;">
-      <li>Move your black hole with the mouse</li>
+      <li>Move your black hole with the mouse/touch</li>
       <li>Collect stars to increase your mass and score</li>
-      <li>Hold SPACE for slow-motion to help with precise movements</li>
+      <li>Hold SPACE for slow-motion to help with precise movements (Desktop only)</li>
       <li>Avoid rival black holes (red) - they reduce your mass</li>
       <li>Game ends if your mass reaches zero</li>
     </ul>
@@ -493,6 +552,29 @@ function createUI() {
     }
   });
 
+  // Add Media Query Styles
+  const styleSheet = document.createElement('style');
+  styleSheet.textContent = `
+    @media (max-width: 768px) { /* Adjust breakpoint as needed */
+      #ui-container {
+        font-size: 12px; /* Smaller font for score/mass */
+        top: 10px;
+        right: 10px;
+      }
+      #high-score-display {
+         font-size: 12px; /* Smaller font for high score */
+      }
+      #info-icon {
+        font-size: 24px; /* Smaller info icon */
+        top: 10px;
+        left: 10px;
+      }
+       /* Adjust dialog padding for smaller screens */
+      /* You might want to add more dialog adjustments here */
+    }
+  `;
+  document.head.appendChild(styleSheet);
+
   updateUI();
 }
 
@@ -502,7 +584,7 @@ function updateUI() {
   const highScoreElement = document.getElementById('high-score-display');
 
   if (scoreElement && massElement && highScoreElement) {
-    scoreElement.textContent = `Stars eaten: ${score}`;
+    scoreElement.textContent = `Stars hunted: ${score}`;
     massElement.textContent = `Mass: ${blackHoleMass} M☉`;
     highScoreElement.textContent = `Highest Score: ${highScore}`;
     highScoreElement.style.fontSize = '16px';
@@ -529,10 +611,14 @@ function spawnStar() {
   star.rotation.z = Math.random() * Math.PI * 2;
 
   // Modified target position calculation to create more diverse paths
-  const targetAngle = Math.random() * Math.PI * 2;
+  const isMobile = sizes.width <= 768; // Check if screen is narrow
+  const targetAngle = isMobile
+    ? Math.PI + Math.random() * Math.PI // Bias angle to bottom half (PI to 2*PI) on mobile
+    : Math.random() * Math.PI * 2; // Full circle on desktop
+
   const targetRadius = STAR_TARGET_RADIUS * (0.5 + Math.random() * 0.5);
   const targetX = Math.cos(targetAngle) * targetRadius;
-  const targetY = Math.sin(targetAngle) * targetRadius;
+  const targetY = Math.sin(targetAngle) * targetRadius; // targetY will be mostly negative on mobile
   const targetPos = new THREE.Vector3(targetX, targetY, 0);
   const direction = targetPos.clone().sub(initialPos).normalize();
 
@@ -784,11 +870,11 @@ function createDamageOverlay() {
 }
 
 function checkCollisions() {
-  const starEffectiveRadius = STAR_OUTER_RADIUS * COLLISION_THRESHOLD_XY_FACTOR;
+  const starEffectiveRadius = EFFECTIVE_STAR_OUTER_RADIUS * COLLISION_THRESHOLD_XY_FACTOR;
   const blackHoleInnerRadius =
-    BLACK_HOLE_COLLISION_CENTER_RADIUS - BLACK_HOLE_COLLISION_RING_WIDTH / 2;
+    EFFECTIVE_COLLISION_CENTER_RADIUS - EFFECTIVE_COLLISION_RING_WIDTH / 2;
   const blackHoleOuterRadius =
-    BLACK_HOLE_COLLISION_CENTER_RADIUS + BLACK_HOLE_COLLISION_RING_WIDTH / 2;
+    EFFECTIVE_COLLISION_CENTER_RADIUS + EFFECTIVE_COLLISION_RING_WIDTH / 2;
   const minCollisionDist = Math.max(
     0,
     blackHoleInnerRadius - starEffectiveRadius - COLLISION_PADDING
@@ -831,7 +917,7 @@ function checkCollisions() {
         tScale = Math.max(0, Math.min(1, tScale));
         const cueBorderScale =
           CUE_BORDER_MIN_SCALE + tScale * (CUE_BORDER_MAX_SCALE - CUE_BORDER_MIN_SCALE);
-        const cueBorderHalfSize = (CUE_BORDER_BASE_SIZE * cueBorderScale) / 2.0;
+        const cueBorderHalfSize = (EFFECTIVE_CUE_BORDER_BASE_SIZE * cueBorderScale) / 2.0;
         const cueCenterX = intersectX + cueOffsetX;
         const cueCenterY = intersectY + cueOffsetY;
 
@@ -1056,9 +1142,37 @@ const animate = () => {
   if (gameActive) {
     const effectiveSpeed = gameSpeed * deltaTime;
 
-    // Update Player Position
-    const targetX = mousePosition.x * BLACK_HOLE_MOVEMENT_BOUNDS_X;
-    const targetY = mousePosition.y * BLACK_HOLE_MOVEMENT_BOUNDS_Y;
+    // Update Player Position (with clamping)
+    let targetX = mousePosition.x * BLACK_HOLE_MOVEMENT_BOUNDS_X;
+    let targetY: number;
+
+    if (isMobile) {
+      // Map mouse Y from [-1 (bottom), 1 (top)] to [-new_bottom_bound, top_bound]
+      const topBound = BLACK_HOLE_MOVEMENT_BOUNDS_Y; // Keep original top bound
+
+      // Calculate the visible half-height at the player's Z-plane (z=0)
+      // Uses vertical FOV and camera distance
+      const halfVisibleHeight =
+        Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z;
+
+      // Calculate the desired bottom bound for the black hole's *center*
+      // so its bottom edge touches the screen's bottom edge
+      const newBottomBound = halfVisibleHeight - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2;
+
+      // Perform linear mapping: targetY = a * mousePosition.y + b
+      // Where: -1 maps to -newBottomBound, and 1 maps to topBound
+      const a = (topBound + newBottomBound) / 2; // Slope
+      const b = (topBound - newBottomBound) / 2; // Y-intercept
+      targetY = a * mousePosition.y + b;
+    } else {
+      // Original calculation for desktop
+      targetY = mousePosition.y * BLACK_HOLE_MOVEMENT_BOUNDS_Y;
+    }
+
+    // Clamp horizontal movement accounting for black hole size
+    const effectiveBoundX = BLACK_HOLE_MOVEMENT_BOUNDS_X - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0;
+    targetX = Math.max(-effectiveBoundX, Math.min(effectiveBoundX, targetX));
+
     gsap.to(playerGroup.position, {
       x: targetX,
       y: targetY,
@@ -1184,18 +1298,6 @@ const animate = () => {
   composer.render();
   requestAnimationFrame(animate);
 };
-
-// --- Handle Window Resize ---
-window.addEventListener('resize', () => {
-  sizes.width = window.innerWidth;
-  sizes.height = window.innerHeight;
-  camera.aspect = sizes.width / sizes.height;
-  camera.updateProjectionMatrix();
-  renderer.setSize(sizes.width, sizes.height);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  composer.setSize(sizes.width, sizes.height);
-  bloomPass.setSize(sizes.width, sizes.height);
-});
 
 // --- Start Game ---
 createUI();
