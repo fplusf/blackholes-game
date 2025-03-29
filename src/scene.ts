@@ -1,303 +1,615 @@
-// src/main.ts
+// src/main.ts (or scene.ts)
 
+// --- IMPORTS (Keep all imports) ---
 import { gsap } from 'gsap';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-// No need for ImprovedNoise if clouds are removed
-// import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
 
-// --- Configuration ---
+// --- CONFIGURATION (Keep all config constants) ---
 const PARTICLE_COUNT = 4000;
 const PARTICLE_SPREAD = 90;
-const RING_RADIUS = 1.5; // *** Slightly Smaller Ring ***
-const RING_THICKNESS = 0.20; // Adjusted thickness
-const BUBBLE_RADIUS = 0.5;
-
-const RING_MOVEMENT_BOUNDS_X = 7;
-const RING_MOVEMENT_BOUNDS_Y = 3.5;
-
-const BASE_GAME_SPEED = 9.0;
+const BLACK_HOLE_PLANE_SIZE = 3.0;
+const BLACK_HOLE_COLLISION_CENTER_RADIUS = 0.4;
+const BLACK_HOLE_COLLISION_RING_WIDTH = 0.2;
+const COLLISION_PADDING = 0.05;
+const STAR_OUTER_RADIUS = 0.5;
+const STAR_INNER_RADIUS = STAR_OUTER_RADIUS * 0.4;
+const STAR_POINTS = 4;
+const BLACK_HOLE_MOVEMENT_BOUNDS_X = 7;
+const BLACK_HOLE_MOVEMENT_BOUNDS_Y = 3.5;
+const BASE_GAME_SPEED = 25.0; // Increased from 18.0 to 25.0 for faster starting speed
 const SLOW_MO_FACTOR = 0.2;
-
-const SPAWN_INTERVAL_BUBBLE = 0.65;
+const SPEED_INCREASE_INTERVAL = 15; // Number of stars needed to trigger speed increase
+const SPEED_INCREASE_AMOUNT = 3.0; // Amount to increase speed by
+const MAX_GAME_SPEED = 45.0; // Maximum speed cap
 const SPAWN_DISTANCE_Z = -80;
 const CLEANUP_DISTANCE_Z = 12;
-const COLLISION_THRESHOLD_Z = 0.6;
+const COLLISION_THRESHOLD_XY_FACTOR = 0.8;
+const STAR_TARGET_RADIUS = 4.0;
+const CUE_BORDER_COLOR = new THREE.Color(0xaaaaaa);
+const CUE_BORDER_OPACITY = 0.6;
+const CUE_BORDER_BASE_SIZE = STAR_OUTER_RADIUS * 2.2;
+const CUE_BORDER_MIN_SCALE = 1.0;
+const CUE_BORDER_MAX_SCALE = 8.0;
+const CUE_BORDER_MAX_OFFSET = STAR_OUTER_RADIUS * 0.5;
+const CUE_BORDER_FADE_START_Z = -20.0;
+const CUE_BORDER_FADE_END_Z = -5.0;
+const COLLISION_RING_FORGIVENESS = 0.4; // Added to make collision detection more forgiving
+
+// --- UI Constants ---
+const INITIAL_BLACK_HOLE_MASS = 1; // Initial mass in solar masses (whole number)
+const MASS_INCREASE_AMOUNT = 1; // Mass increase per 15 stars (whole number)
 
 // --- Colors ---
-const RING_COLOR = new THREE.Color(0xd0f0ff);
-const FLASH_COLOR = new THREE.Color(0x44ffaa); // Vibrant Green Flash Color
-const BUBBLE_COLOR = new THREE.Color(0xd0f0ff);
+const FLASH_COLOR = new THREE.Color(0xADD8E6); // Light Blue Flash
 const STAR_COLOR = new THREE.Color(0xffffff);
-const BACKGROUND_COLOR = new THREE.Color(0x030510);
+const BACKGROUND_COLOR = new THREE.Color(0x000000);
 const FOG_COLOR = BACKGROUND_COLOR;
 
 // --- Game State ---
 let gameSpeed = BASE_GAME_SPEED;
 let score = 0;
+let lastSpeedIncreaseScore = 0;
+let blackHoleMass = INITIAL_BLACK_HOLE_MASS;
 let elapsedTime = 0;
 let isSlowMo = false;
-let timeSinceLastBubble = 0;
 let gameActive = true;
-const bubbles: THREE.Mesh[] = [];
+const stars: THREE.Mesh[] = [];
 
-// --- Basic Setup ---
+// --- Black Hole Shaders ---
+const blackHoleVertexShader = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+const blackHoleFragmentShader = `
+varying vec2 vUv;
+
+uniform sampler2D uTexture;
+uniform float uIntensity;
+uniform vec3 uFlashColor;
+uniform float uFlashIntensity;
+
+float calculateLuminance(vec3 color) {
+  return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+void main() {
+  vec4 textureColor = texture2D(uTexture, vUv);
+
+  vec3 baseColor = textureColor.rgb * uIntensity;
+  baseColor += uFlashColor * uFlashIntensity;
+
+  float brightness = calculateLuminance(textureColor.rgb);
+  float alpha = smoothstep(0.03, 0.25, brightness);
+
+  gl_FragColor = vec4(baseColor, alpha);
+
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;
+
+// --- Texture Loader ---
+const textureLoader = new THREE.TextureLoader();
+let blackHoleTexture: THREE.Texture | null = null;
+const texturePath = '/textures/black-hole-texture.png'; // Verify path
+
+// --- Basic Scene Setup ---
 const scene = new THREE.Scene();
-const sizes = {
-    width: window.innerWidth,
-    height: window.innerHeight
-};
+const sizes = { width: window.innerWidth, height: window.innerHeight };
 scene.background = BACKGROUND_COLOR;
-scene.fog = new THREE.Fog(FOG_COLOR, 50, PARTICLE_SPREAD * 1.1);
-
-// Camera
+scene.fog = new THREE.Fog(FOG_COLOR, 80, PARTICLE_SPREAD * 1.2);
 const camera = new THREE.PerspectiveCamera(60, sizes.width / sizes.height, 0.1, 180);
 camera.position.z = 11;
 scene.add(camera);
-
-// Renderer
 const canvas = document.getElementById('webgl-canvas') as HTMLCanvasElement;
-if (!canvas) throw new Error("Canvas not found!");
-const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+if (!canvas) throw new Error("Canvas element with ID 'webgl-canvas' not found!");
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
 renderer.setSize(sizes.width, sizes.height);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(BACKGROUND_COLOR, 1);
 
 // --- Post Processing (Bloom) ---
 const renderScene = new RenderPass(scene, camera);
 const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(sizes.width, sizes.height),
-    1.0,
-    0.7,
-    0.9
+  new THREE.Vector2(sizes.width, sizes.height),
+  1.7,
+  0.9,
+  0.70
 );
 const composer = new EffectComposer(renderer);
 composer.addPass(renderScene);
 composer.addPass(bloomPass);
+const ORIGINAL_BLOOM_STRENGTH = bloomPass.strength;
 
-// --- Mouse Tracking --- (Same)
+// --- Mouse Tracking ---
 const mousePosition = new THREE.Vector2();
 window.addEventListener('mousemove', (event) => {
-    mousePosition.x = (event.clientX / sizes.width) * 2 - 1;
-    mousePosition.y = -(event.clientY / sizes.height) * 2 + 1;
+  mousePosition.x = (event.clientX / sizes.width) * 2 - 1;
+  mousePosition.y = -(event.clientY / sizes.height) * 2 + 1;
 });
 
-// --- Objects ---
-
-// Player Group
+// --- Game Objects ---
 const playerGroup = new THREE.Group();
-scene.add(playerGroup);
 playerGroup.position.z = 0;
+scene.add(playerGroup);
+const blackHoleGeometry = new THREE.PlaneGeometry(BLACK_HOLE_PLANE_SIZE, BLACK_HOLE_PLANE_SIZE, 32, 32);
 
-// Ring (Now uses updated RING_RADIUS)
-const ringGeometry = new THREE.RingGeometry(
-    RING_RADIUS - RING_THICKNESS / 2,
-    RING_RADIUS + RING_THICKNESS / 2,
-    128
-);
-const ringMaterial = new THREE.MeshBasicMaterial({
-    color: RING_COLOR.clone(), // Clone color for safe modification
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.9
+// Black Hole Material
+const blackHoleMaterial = new THREE.ShaderMaterial({
+  vertexShader: blackHoleVertexShader,
+  fragmentShader: blackHoleFragmentShader,
+  uniforms: {
+    uTexture: { value: blackHoleTexture },
+    uIntensity: { value: 1.15 },
+    uFlashColor: { value: FLASH_COLOR },
+    uFlashIntensity: { value: 0.0 },
+  },
+  transparent: true,
+  depthWrite: false,
+  side: THREE.DoubleSide,
 });
-const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-playerGroup.add(ring);
 
-// Starfield Particle System (Same as previous)
+// Load texture after material is created
+textureLoader.load(
+  texturePath,
+  (texture) => {
+    console.log(`Black hole texture loaded successfully from: ${texturePath}`);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    blackHoleTexture = texture;
+    if (blackHoleMaterial) {
+      blackHoleMaterial.uniforms.uTexture.value = texture;
+      blackHoleMaterial.needsUpdate = true;
+    }
+  },
+  undefined,
+  (error) => {
+    console.error(`!!! ERROR LOADING BLACK HOLE TEXTURE !!! Attempted path: ${texturePath}`, error);
+  }
+);
+
+const blackHole = new THREE.Mesh(blackHoleGeometry, blackHoleMaterial);
+playerGroup.add(blackHole);
+
+// --- Starfield Particle System ---
 const particlesGeometry = new THREE.BufferGeometry();
 const positions = new Float32Array(PARTICLE_COUNT * 3);
 const colors = new Float32Array(PARTICLE_COUNT * 3);
-// ... (particle generation logic - same starfield code) ...
+
 for (let i = 0; i < PARTICLE_COUNT; i++) {
-    const i3 = i * 3;
-    const radius = Math.random() * PARTICLE_SPREAD * 0.6 + PARTICLE_SPREAD * 0.1;
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-    positions[i3] = radius * Math.sin(phi) * Math.cos(theta);
-    positions[i3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
-    positions[i3 + 2] = radius * Math.cos(phi) - PARTICLE_SPREAD * 0.3;
-    const intensity = Math.random() * 0.5 + 0.5;
-    colors[i3] = STAR_COLOR.r * intensity;
-    colors[i3 + 1] = STAR_COLOR.g * intensity;
-    colors[i3 + 2] = STAR_COLOR.b * intensity;
+  const i3 = i * 3;
+  const radius = Math.random() * PARTICLE_SPREAD * 0.7 + PARTICLE_SPREAD * 0.2;
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  
+  positions[i3] = radius * Math.sin(phi) * Math.cos(theta);
+  positions[i3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+  positions[i3 + 2] = radius * Math.cos(phi) - PARTICLE_SPREAD * 0.4;
+  
+  const intensity = Math.random() * 0.5 + 0.5;
+  colors[i3] = STAR_COLOR.r * intensity;
+  colors[i3 + 1] = STAR_COLOR.g * intensity;
+  colors[i3 + 2] = STAR_COLOR.b * intensity;
 }
 
 particlesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 particlesGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
 const particlesMaterial = new THREE.PointsMaterial({
-    vertexColors: true,
-    size: 0.06,
-    sizeAttenuation: true,
-    transparent: true,
-    opacity: 0.7,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false
+  vertexColors: true,
+  size: 0.06,
+  sizeAttenuation: true,
+  transparent: true,
+  opacity: 0.7,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false
 });
+
 const particles = new THREE.Points(particlesGeometry, particlesMaterial);
 particles.rotation.x = Math.random() * 0.1;
 particles.rotation.y = Math.random() * 0.1;
 scene.add(particles);
 
-// --- Bubble Spawning --- (Same)
-const bubbleGeometry = new THREE.SphereGeometry(BUBBLE_RADIUS, 16, 8);
-const bubbleMaterial = new THREE.MeshBasicMaterial({
-    color: BUBBLE_COLOR,
-    transparent: true,
-    opacity: 0.6,
-    blending: THREE.AdditiveBlending
-});
-
-// ... (spawnBubble function remains the same) ...
-function spawnBubble() {
-    const bubble = new THREE.Mesh(bubbleGeometry, bubbleMaterial.clone());
-    const spawnAreaX = RING_MOVEMENT_BOUNDS_X * 1.6;
-    const spawnAreaY = RING_MOVEMENT_BOUNDS_Y * 1.6;
-    bubble.position.x = (Math.random() - 0.5) * spawnAreaX * 2;
-    bubble.position.y = (Math.random() - 0.5) * spawnAreaY * 2;
-    bubble.position.z = SPAWN_DISTANCE_Z - Math.random() * 25;
-    scene.add(bubble);
-    bubbles.push(bubble);
+// --- Star Collectible Geometry/Material ---
+function createStarGeometry(outerRadius: number, innerRadius: number, points: number): THREE.ShapeGeometry {
+  const shape = new THREE.Shape();
+  const angleStep = Math.PI / points;
+  shape.moveTo(outerRadius, 0);
+  for (let i = 1; i <= points * 2; i++) {
+    const radius = i % 2 === 0 ? outerRadius : innerRadius;
+    const angle = angleStep * i;
+    shape.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
+  }
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape);
 }
 
-// --- Input Handling (Slow-mo) --- (Same)
-// ... (keydown/keyup event listeners remain the same) ...
+const starGeometry = createStarGeometry(STAR_OUTER_RADIUS, STAR_INNER_RADIUS, STAR_POINTS);
+const starMaterial = new THREE.MeshBasicMaterial({
+  color: STAR_COLOR,
+  transparent: true,
+  opacity: 0.9,
+  blending: THREE.AdditiveBlending,
+  side: THREE.DoubleSide,
+  depthWrite: false
+});
+
+// --- Shared Cue Border Geometry & Material ---
+const cueBorderPlaneGeometry = new THREE.PlaneGeometry(CUE_BORDER_BASE_SIZE, CUE_BORDER_BASE_SIZE);
+const cueBorderEdgesGeometry = new THREE.EdgesGeometry(cueBorderPlaneGeometry);
+const cueBorderLineMaterial = new THREE.LineBasicMaterial({
+  color: CUE_BORDER_COLOR,
+  transparent: true,
+  opacity: CUE_BORDER_OPACITY,
+  depthWrite: false
+});
+
+// --- UI Setup ---
+function createUI() {
+  const uiContainer = document.createElement('div');
+  uiContainer.style.position = 'fixed';
+  uiContainer.style.top = '20px';
+  uiContainer.style.right = '20px';
+  uiContainer.style.color = '#ffffff';
+  uiContainer.style.fontFamily = 'Arial, sans-serif';
+  uiContainer.style.fontSize = '24px';
+  uiContainer.style.textAlign = 'right';
+  uiContainer.style.zIndex = '1000';
+  uiContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+  
+  const scoreElement = document.createElement('div');
+  scoreElement.id = 'score-display';
+  scoreElement.style.marginBottom = '10px';
+  
+  const massElement = document.createElement('div');
+  massElement.id = 'mass-display';
+  
+  uiContainer.appendChild(scoreElement);
+  uiContainer.appendChild(massElement);
+  document.body.appendChild(uiContainer);
+  
+  updateUI();
+}
+
+function updateUI() {
+  const scoreElement = document.getElementById('score-display');
+  const massElement = document.getElementById('mass-display');
+  
+  if (scoreElement && massElement) {
+    scoreElement.textContent = `Stars eaten: ${score}`;
+    massElement.textContent = `Black Hole Mass: ${blackHoleMass} M☉`;
+  }
+}
+
+// --- Star Spawning ---
+function spawnStar() {
+  if (stars.length > 0) return;
+  
+  const star = new THREE.Mesh(starGeometry, starMaterial.clone());
+  const spawnAreaX = BLACK_HOLE_MOVEMENT_BOUNDS_X * 2.0; // Increased from 1.5
+  const spawnAreaY = BLACK_HOLE_MOVEMENT_BOUNDS_Y * 2.0; // Increased from 1.5
+  const initialX = (Math.random() - 0.5) * spawnAreaX * 2;
+  const initialY = (Math.random() - 0.5) * spawnAreaY * 2;
+  const initialZ = SPAWN_DISTANCE_Z - Math.random() * 30;
+  
+  star.position.set(initialX, initialY, initialZ);
+  const initialPos = star.position.clone();
+  star.rotation.z = Math.random() * Math.PI * 2;
+  
+  // Modified target position calculation to create more diverse paths
+  const targetAngle = Math.random() * Math.PI * 2;
+  const targetRadius = STAR_TARGET_RADIUS * (0.5 + Math.random() * 0.5); // Random radius between 50% and 100% of STAR_TARGET_RADIUS
+  const targetX = Math.cos(targetAngle) * targetRadius;
+  const targetY = Math.sin(targetAngle) * targetRadius;
+  const targetPos = new THREE.Vector3(targetX, targetY, 0);
+  const direction = targetPos.clone().sub(initialPos).normalize();
+  
+  const offsetAngle = Math.random() * Math.PI * 2;
+  const offsetMagnitude = Math.random() * CUE_BORDER_MAX_OFFSET;
+  const cueOffsetX = Math.cos(offsetAngle) * offsetMagnitude;
+  const cueOffsetY = Math.sin(offsetAngle) * offsetMagnitude;
+  
+  const borderMaterialClone = cueBorderLineMaterial.clone();
+  borderMaterialClone.opacity = 0;
+  const cueBorder = new THREE.LineSegments(cueBorderEdgesGeometry, borderMaterialClone);
+  cueBorder.position.set(cueOffsetX, cueOffsetY, 0);
+  star.add(cueBorder);
+  
+  star.userData = {
+    previousPosition: initialPos.clone(),
+    direction: direction,
+    cueBorder: cueBorder,
+    cueOffsetX: cueOffsetX,
+    cueOffsetY: cueOffsetY
+  };
+  
+  scene.add(star);
+  stars.push(star);
+}
+
+// --- Input Handling (Slow-motion) ---
 window.addEventListener('keydown', (event) => {
-    if (event.code === 'Space' && !isSlowMo) {
-        isSlowMo = true;
-        gsap.to({ speed: gameSpeed }, { speed: BASE_GAME_SPEED * SLOW_MO_FACTOR, duration: 0.2, onUpdate: (tween) => gameSpeed = tween.targets()[0].speed });
-        gsap.to(bloomPass, { strength: bloomPass.strength * 0.8, duration: 0.2 });
-    }
+  if (event.code === 'Space' && !isSlowMo && gameActive) {
+    isSlowMo = true;
+    gsap.to({ speed: gameSpeed }, {
+      speed: BASE_GAME_SPEED * SLOW_MO_FACTOR,
+      duration: 0.2,
+      onUpdate: (tween) => gameSpeed = tween.targets()[0].speed
+    });
+    gsap.to(bloomPass, {
+      strength: ORIGINAL_BLOOM_STRENGTH * 0.85,
+      duration: 0.2
+    });
+  }
 });
+
 window.addEventListener('keyup', (event) => {
-    if (event.code === 'Space' && isSlowMo) {
-        isSlowMo = false;
-         gsap.to({ speed: gameSpeed }, { speed: BASE_GAME_SPEED, duration: 0.5, onUpdate: (tween) => gameSpeed = tween.targets()[0].speed });
-        gsap.to(bloomPass, { strength: 1.0, duration: 0.5 });
-    }
+  if (event.code === 'Space' && isSlowMo && gameActive) {
+    isSlowMo = false;
+    gsap.to({ speed: gameSpeed }, {
+      speed: BASE_GAME_SPEED,
+      duration: 0.5,
+      ease: 'power1.out',
+      onUpdate: (tween) => gameSpeed = tween.targets()[0].speed
+    });
+    gsap.to(bloomPass, {
+      strength: ORIGINAL_BLOOM_STRENGTH,
+      duration: 0.5
+    });
+  }
 });
 
+// --- Collision Detection ---
+const FLASH_INTENSITY_MAX = 1.8;
+const FLASH_DURATION = 0.30;
 
-// --- Collision Detection --- (Added Flash Animation)
 function checkCollisions() {
-    const collisionDistSq = (RING_RADIUS + BUBBLE_RADIUS * 0.5)**2; // Keep generous collision
-
-    for (let i = bubbles.length - 1; i >= 0; i--) {
-        const bubble = bubbles[i];
-        if (Math.abs(bubble.position.z - playerGroup.position.z) < COLLISION_THRESHOLD_Z) {
-            const dx = bubble.position.x - playerGroup.position.x;
-            const dy = bubble.position.y - playerGroup.position.y;
-            const distanceSq = dx*dx + dy*dy;
-
-            if (distanceSq < collisionDistSq) {
-                score++;
-                console.log("Score:", score); // UI Update
-
-                // --- Trigger Flash Animation ---
-                gsap.to(ring.material.color, {
-                    r: FLASH_COLOR.r,
-                    g: FLASH_COLOR.g,
-                    b: FLASH_COLOR.b,
-                    duration: 0.1, // Quick change to green
-                    yoyo: true, // Animate back
-                    repeat: 1, // Play forward then backward once
-                    ease: 'power1.inOut'
-                });
-                // Optional: Add slight scale pulse
-                gsap.to(ring.scale, {
-                    x: 1.1, // Scale up slightly
-                    y: 1.1,
-                    duration: 0.1,
-                    yoyo: true,
-                    repeat: 1,
-                    ease: 'power1.inOut'
-                });
-                // --- End Flash Animation ---
-
-
-                // Bubble pop animation
-                 gsap.to(bubble.scale, { x: 1.8, y: 1.8, z: 1.8, duration: 0.15, ease: 'power1.out', onComplete: () => {
-                     scene.remove(bubble);
-                 }});
-                 gsap.to(bubble.material as THREE.MeshBasicMaterial, { opacity: 0, duration: 0.15 });
-
-                bubbles.splice(i, 1);
+  const starEffectiveRadius = STAR_OUTER_RADIUS * COLLISION_THRESHOLD_XY_FACTOR;
+  const blackHoleInnerRadius = BLACK_HOLE_COLLISION_CENTER_RADIUS - BLACK_HOLE_COLLISION_RING_WIDTH / 2;
+  const blackHoleOuterRadius = BLACK_HOLE_COLLISION_CENTER_RADIUS + BLACK_HOLE_COLLISION_RING_WIDTH / 2;
+  const minCollisionDist = Math.max(0, blackHoleInnerRadius - starEffectiveRadius - COLLISION_PADDING);
+  const minCollisionDistSq = minCollisionDist * minCollisionDist;
+  const maxCollisionDist = blackHoleOuterRadius + starEffectiveRadius + COLLISION_PADDING;
+  const maxCollisionDistSq = maxCollisionDist * maxCollisionDist;
+  const blackHoleZPlane = playerGroup.position.z;
+  
+  for (let i = stars.length - 1; i >= 0; i--) {
+    const star = stars[i];
+    if (!star || !star.userData || !(star.userData.previousPosition instanceof THREE.Vector3) || 
+        !(star.userData.cueBorder instanceof THREE.LineSegments) || 
+        typeof star.userData.cueOffsetX !== 'number' || 
+        typeof star.userData.cueOffsetY !== 'number') continue;
+        
+    const prevPos = star.userData.previousPosition as THREE.Vector3;
+    const currPos = star.position;
+    const cueBorder = star.userData.cueBorder as THREE.LineSegments;
+    const cueOffsetX = star.userData.cueOffsetX as number;
+    const cueOffsetY = star.userData.cueOffsetY as number;
+    
+    if (prevPos.z < blackHoleZPlane && currPos.z >= blackHoleZPlane) {
+      const zMovement = currPos.z - prevPos.z;
+      if (zMovement > 1e-6) {
+        const tZCrossing = (blackHoleZPlane - prevPos.z) / zMovement;
+        const intersectX = prevPos.x + (currPos.x - prevPos.x) * tZCrossing;
+        const intersectY = prevPos.y + (currPos.y - prevPos.y) * tZCrossing;
+        
+        // Calculate cue border scale with more forgiving bounds
+        const startZ_scale = SPAWN_DISTANCE_Z;
+        const endZ_scale = 0;
+        let tScale = (blackHoleZPlane - startZ_scale) / (endZ_scale - startZ_scale);
+        tScale = Math.max(0, Math.min(1, tScale));
+        const cueBorderScale = CUE_BORDER_MIN_SCALE + tScale * (CUE_BORDER_MAX_SCALE - CUE_BORDER_MIN_SCALE);
+        const cueBorderHalfSize = (CUE_BORDER_BASE_SIZE * cueBorderScale) / 2.0;
+        const cueCenterX = intersectX + cueOffsetX;
+        const cueCenterY = intersectY + cueOffsetY;
+        
+        // More forgiving cue border check
+        const playerX = playerGroup.position.x;
+        const playerY = playerGroup.position.y;
+        const dx = playerX - cueCenterX;
+        const dy = playerY - cueCenterY;
+        const distanceToCueCenter = Math.sqrt(dx * dx + dy * dy);
+        const maxAllowedDistance = cueBorderHalfSize * COLLISION_RING_FORGIVENESS; // More forgiving distance check
+        
+        // Check if player is within the cue border with more forgiving bounds
+        const isPlayerInCueBorder = distanceToCueCenter <= maxAllowedDistance;
+        
+        // More forgiving ring collision check
+        const dxToStar = intersectX - playerX;
+        const dyToStar = intersectY - playerY;
+        const distanceSq = dxToStar * dxToStar + dyToStar * dyToStar;
+        const isWithinCollisionRing = (distanceSq >= minCollisionDistSq * 0.8 && // More forgiving inner radius
+                                      distanceSq <= maxCollisionDistSq * 1.2);   // More forgiving outer radius
+        
+        // Trigger catch if either condition is met with more forgiving checks
+        if (isPlayerInCueBorder || isWithinCollisionRing) {
+          score++;
+          
+          // Check if we should increase speed and mass
+          if (score - lastSpeedIncreaseScore >= SPEED_INCREASE_INTERVAL) {
+            const newSpeed = Math.min(gameSpeed + SPEED_INCREASE_AMOUNT, MAX_GAME_SPEED);
+            if (newSpeed !== gameSpeed) {
+              gameSpeed = newSpeed;
+              lastSpeedIncreaseScore = score;
+              blackHoleMass += MASS_INCREASE_AMOUNT;
+              
+              // Visual feedback for speed increase
+              gsap.to(bloomPass, {
+                strength: ORIGINAL_BLOOM_STRENGTH * 1.2,
+                duration: 0.3,
+                yoyo: true,
+                repeat: 1
+              });
             }
+          }
+          
+          // Update UI
+          updateUI();
+          
+          gsap.killTweensOf(blackHoleMaterial.uniforms.uFlashIntensity);
+          blackHoleMaterial.uniforms.uFlashIntensity.value = FLASH_INTENSITY_MAX;
+          gsap.to(blackHoleMaterial.uniforms.uFlashIntensity, {
+            value: 0.0,
+            duration: FLASH_DURATION,
+            ease: 'power2.out'
+          });
+          
+          const cueBorderToDispose = star.userData.cueBorder as THREE.LineSegments;
+          stars.splice(i, 1);
+          spawnStar();
+          
+          gsap.to(star.scale, {
+            x: 1.8,
+            y: 1.8,
+            z: 1.8,
+            duration: 0.15,
+            ease: 'power1.out',
+            onComplete: () => {
+              scene.remove(star);
+              (star.material as THREE.Material).dispose();
+            }
+          });
+          
+          gsap.to(star.material as THREE.MeshBasicMaterial, {
+            opacity: 0,
+            duration: 0.15
+          });
+          
+          if (cueBorderToDispose) {
+            (cueBorderToDispose.material as THREE.Material).dispose();
+          }
+          return;
         }
+      }
     }
+    if (star.userData.previousPosition) {
+      prevPos.copy(currPos);
+    }
+  }
 }
 
-// --- Animation Loop --- (Same logic)
+// --- Animation Loop ---
 const clock = new THREE.Clock();
-
 const animate = () => {
-    const deltaTime = clock.getDelta();
-    elapsedTime += deltaTime;
-
-    if (!gameActive) {
-        requestAnimationFrame(animate);
-        composer.render();
-        return;
-    }
-
+  const deltaTime = clock.getDelta();
+  elapsedTime += deltaTime;
+  
+  if (gameActive) {
     const effectiveSpeed = gameSpeed * deltaTime;
-
-    // --- Update Player Group Position --- (Same)
-    const targetX = mousePosition.x * RING_MOVEMENT_BOUNDS_X;
-    const targetY = mousePosition.y * RING_MOVEMENT_BOUNDS_Y;
+    
+    // Update Player
+    const targetX = mousePosition.x * BLACK_HOLE_MOVEMENT_BOUNDS_X;
+    const targetY = mousePosition.y * BLACK_HOLE_MOVEMENT_BOUNDS_Y;
     gsap.to(playerGroup.position, {
-        x: targetX,
-        y: targetY,
-        duration: 0.15,
-        ease: 'power1.out',
-        overwrite: true
+      x: targetX,
+      y: targetY,
+      duration: 0.15,
+      ease: 'power1.out',
+      overwrite: true
     });
-
-    // --- Move Bubbles --- (Same)
-     for (let i = bubbles.length - 1; i >= 0; i--) {
-        const bubble = bubbles[i];
-        bubble.position.z += effectiveSpeed;
-        if (bubble.position.z > CLEANUP_DISTANCE_Z) {
-            scene.remove(bubble);
-            bubbles.splice(i, 1);
+    
+    // Update Star & Cue Border
+    for (let i = stars.length - 1; i >= 0; i--) {
+      const star = stars[i];
+      if (!star.userData || !(star.userData.direction instanceof THREE.Vector3) || 
+          !(star.userData.cueBorder instanceof THREE.LineSegments)) continue;
+          
+      const direction = star.userData.direction as THREE.Vector3;
+      const cueBorder = star.userData.cueBorder as THREE.LineSegments;
+      const cueBorderMat = cueBorder.material as THREE.LineBasicMaterial;
+      
+      // Move Star
+      star.position.addScaledVector(direction, effectiveSpeed);
+      const currentZ = star.position.z;
+      
+      // Update Cue Border Scale
+      const scaleT = Math.max(0, Math.min(1, (currentZ - SPAWN_DISTANCE_Z) / (0 - SPAWN_DISTANCE_Z)));
+      const scale = CUE_BORDER_MIN_SCALE + scaleT * (CUE_BORDER_MAX_SCALE - CUE_BORDER_MIN_SCALE);
+      cueBorder.scale.set(scale, scale, 1);
+      
+      // Update Cue Border Opacity - Make it disappear after passing black hole
+      let targetOpacity = 0;
+      if (currentZ > CUE_BORDER_FADE_START_Z) {
+        if (currentZ > CUE_BORDER_FADE_END_Z) {
+          targetOpacity = 0; // Changed to 0 to make it disappear after passing
+        } else {
+          const fadeRange = CUE_BORDER_FADE_END_Z - CUE_BORDER_FADE_START_Z;
+          const progressInFade = currentZ - CUE_BORDER_FADE_START_Z;
+          const fadeT = Math.max(0, Math.min(1, progressInFade / fadeRange));
+          targetOpacity = fadeT * CUE_BORDER_OPACITY;
         }
+      }
+      cueBorderMat.opacity = targetOpacity;
+      
+      // Border Orientation
+      cueBorder.rotation.z = -star.rotation.z;
+      
+      // Rotate Star
+      star.rotation.z += deltaTime * (isSlowMo ? 0.1 : 0.5);
+      
+      // Cleanup Star
+      if (currentZ > CLEANUP_DISTANCE_Z) {
+        const cueBorderToDispose = star.userData.cueBorder as THREE.LineSegments;
+        scene.remove(star);
+        stars.splice(i, 1);
+        spawnStar();
+        (star.material as THREE.Material).dispose();
+        if (cueBorderToDispose) {
+          (cueBorderToDispose.material as THREE.Material).dispose();
+        }
+        break;
+      }
     }
-
-    // --- Spawn New Bubbles --- (Same)
-     timeSinceLastBubble += deltaTime;
-    const currentSpawnInterval = SPAWN_INTERVAL_BUBBLE / (isSlowMo ? SLOW_MO_FACTOR : 1);
-    if (timeSinceLastBubble > currentSpawnInterval) {
-         spawnBubble();
-         timeSinceLastBubble = 0;
+    
+    // Update Particles
+    particles.position.z += effectiveSpeed * 0.015;
+    if (particles.position.z > 30) {
+      particles.position.z -= (PARTICLE_SPREAD + 50);
     }
-
-    // --- Move Background Elements --- (Same - only particles)
-    particles.position.z += effectiveSpeed * 0.01;
-     if (particles.position.z > 20) particles.position.z -= (PARTICLE_SPREAD + 40);
-
-    // --- Check Collisions --- (Now triggers flash)
+    
+    // Check Collisions
     checkCollisions();
-
-    // --- Render ---
-    composer.render();
-
-    requestAnimationFrame(animate);
+  }
+  
+  composer.render();
+  requestAnimationFrame(animate);
 };
 
-// --- Handle Resize --- (Same)
-// ... (resize handling code) ...
+// --- Handle Window Resize ---
 window.addEventListener('resize', () => {
-    sizes.width = window.innerWidth;
-    sizes.height = window.innerHeight;
-    camera.aspect = sizes.width / sizes.height;
-    camera.updateProjectionMatrix();
-    renderer.setSize(sizes.width, sizes.height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    composer.setSize(sizes.width, sizes.height);
-    bloomPass.setSize(sizes.width, sizes.height);
+  sizes.width = window.innerWidth;
+  sizes.height = window.innerHeight;
+  camera.aspect = sizes.width / sizes.height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(sizes.width, sizes.height);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  composer.setSize(sizes.width, sizes.height);
+  bloomPass.setSize(sizes.width, sizes.height);
 });
 
-
 // --- Start Game ---
+createUI();
+spawnStar();
 animate();
+
+// --- Cleanup Shared Resources ---
+window.addEventListener('beforeunload', () => {
+  console.log("Disposing shared resources...");
+  cueBorderPlaneGeometry.dispose();
+  cueBorderEdgesGeometry.dispose();
+  cueBorderLineMaterial.dispose();
+  starGeometry.dispose();
+  starMaterial.dispose();
+  particlesGeometry.dispose();
+  particlesMaterial.dispose();
+  blackHoleGeometry.dispose();
+  blackHoleMaterial.dispose();
+  if (blackHoleTexture) blackHoleTexture.dispose();
+});
