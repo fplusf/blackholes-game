@@ -27,7 +27,7 @@
     "@capacitor/cli": "^7.1.0",
     "@capacitor/core": "^7.1.0",
     "@types/three": "^0.174.0",
-    "gsap": "file:src/gsap/gsap-bonus.tgz",
+    "gsap": "^3.12.3",
     "howler": "^2.2.4",
     "three": "^0.174.0"
   }
