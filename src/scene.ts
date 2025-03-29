@@ -86,6 +86,50 @@ let lastRivalSpawnScore = 0;
 let currentMaxRivals = INITIAL_RIVAL_BLACK_HOLE_COUNT; // Track current maximum number of rivals
 let damageOverlay: HTMLDivElement | null = null; // Track the damage overlay element
 
+// High Score Management
+const HIGH_SCORE_KEY = 'blackHoleGameHighScore';
+let highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) || '0');
+
+// Function to show congratulatory message
+function showHighScoreMessage() {
+  const messageContainer = document.createElement('div');
+  messageContainer.style.position = 'fixed';
+  messageContainer.style.top = '50%';
+  messageContainer.style.left = '50%';
+  messageContainer.style.transform = 'translate(-50%, -50%)';
+  messageContainer.style.color = '#ffffff';
+  messageContainer.style.fontFamily = 'Arial, sans-serif';
+  messageContainer.style.fontSize = '48px';
+  messageContainer.style.textAlign = 'center';
+  messageContainer.style.zIndex = '1000';
+  messageContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+  messageContainer.style.animation = 'fadeInOut 2s ease-in-out forwards';
+
+  const message = document.createElement('div');
+  message.textContent = `🎉 New High Score! ${score} 🎉`;
+  messageContainer.appendChild(message);
+  document.body.appendChild(messageContainer);
+
+  // Add CSS animation
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes fadeInOut {
+      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+      20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+      40% { transform: translate(-50%, -50%) scale(1); }
+      60% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+    }
+  `;
+  document.head.appendChild(style);
+
+  // Remove the message after animation
+  setTimeout(() => {
+    messageContainer.remove();
+    style.remove();
+  }, 2000);
+}
+
 // --- Black Hole Shaders ---
 const blackHoleVertexShader = `
 varying vec2 vUv;
@@ -314,7 +358,7 @@ function createUI() {
   uiContainer.style.right = '20px';
   uiContainer.style.color = '#ffffff';
   uiContainer.style.fontFamily = 'Arial, sans-serif';
-  uiContainer.style.fontSize = '24px';
+  uiContainer.style.fontSize = '20px';
   uiContainer.style.textAlign = 'right';
   uiContainer.style.zIndex = '1000';
   uiContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
@@ -326,9 +370,121 @@ function createUI() {
   const massElement = document.createElement('div');
   massElement.id = 'mass-display';
 
+  const highScoreElement = document.createElement('div');
+  highScoreElement.id = 'high-score-display';
+  highScoreElement.style.marginTop = '10px';
+
   uiContainer.appendChild(scoreElement);
   uiContainer.appendChild(massElement);
+  uiContainer.appendChild(highScoreElement);
   document.body.appendChild(uiContainer);
+
+  // Create info icon
+  const infoIcon = document.createElement('div');
+  infoIcon.innerHTML = 'ⓘ';
+  infoIcon.style.position = 'fixed';
+  infoIcon.style.bottom = '20px';
+  infoIcon.style.right = '20px';
+  infoIcon.style.fontSize = '32px';
+  infoIcon.style.color = '#ffffff';
+  infoIcon.style.cursor = 'pointer';
+  infoIcon.style.zIndex = '1000';
+  infoIcon.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+  infoIcon.style.transition = 'transform 0.2s ease';
+  infoIcon.style.userSelect = 'none';
+
+  // Create dialog
+  const dialog = document.createElement('div');
+  dialog.style.position = 'fixed';
+  dialog.style.top = '50%';
+  dialog.style.left = '50%';
+  dialog.style.transform = 'translate(-50%, -50%)';
+  dialog.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+  dialog.style.padding = '30px';
+  dialog.style.borderRadius = '15px';
+  dialog.style.color = '#ffffff';
+  dialog.style.fontFamily = 'Arial, sans-serif';
+  dialog.style.maxWidth = '500px';
+  dialog.style.width = '90%';
+  dialog.style.zIndex = '1001';
+  dialog.style.display = 'none';
+  dialog.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.2)';
+
+  const dialogContent = document.createElement('div');
+  dialogContent.innerHTML = `
+    <h2 style="margin-top: 0; color: #add8e6;">Black Hole Game</h2>
+    <p>Welcome to the Black Hole Game! Guide your black hole through space, collect stars to grow stronger, and avoid rival black holes.</p>
+    
+    <h3 style="color: #add8e6;">How to Play:</h3>
+    <ul style="text-align: left;">
+      <li>Move your black hole with the mouse</li>
+      <li>Collect stars to increase your mass and score</li>
+      <li>Hold SPACE for slow-motion to help with precise movements</li>
+      <li>Avoid rival black holes (red) - they reduce your mass</li>
+      <li>Game ends if your mass reaches zero</li>
+    </ul>
+
+    <h3 style="color: #add8e6;">Tips:</h3>
+    <ul style="text-align: left;">
+      <li>Watch for the transparent border around stars - it shows the collection zone</li>
+      <li>As you collect more stars, the game speeds up</li>
+      <li>More rival black holes appear as your score increases</li>
+    </ul>
+  `;
+
+  const closeButton = document.createElement('button');
+  closeButton.textContent = 'Close';
+  closeButton.style.marginTop = '20px';
+  closeButton.style.padding = '10px 20px';
+  closeButton.style.backgroundColor = '#add8e6';
+  closeButton.style.border = 'none';
+  closeButton.style.borderRadius = '5px';
+  closeButton.style.cursor = 'pointer';
+  closeButton.style.fontSize = '16px';
+  closeButton.style.color = '#000000';
+  closeButton.style.transition = 'background-color 0.2s ease';
+
+  dialog.appendChild(dialogContent);
+  dialog.appendChild(closeButton);
+  document.body.appendChild(dialog);
+  document.body.appendChild(infoIcon);
+
+  // Add hover effect to info icon
+  infoIcon.addEventListener('mouseenter', () => {
+    infoIcon.style.transform = 'scale(1.2)';
+  });
+
+  infoIcon.addEventListener('mouseleave', () => {
+    infoIcon.style.transform = 'scale(1)';
+  });
+
+  // Add hover effect to close button
+  closeButton.addEventListener('mouseenter', () => {
+    closeButton.style.backgroundColor = '#ffffff';
+  });
+
+  closeButton.addEventListener('mouseleave', () => {
+    closeButton.style.backgroundColor = '#add8e6';
+  });
+
+  // Handle dialog open/close
+  infoIcon.addEventListener('click', () => {
+    dialog.style.display = 'block';
+    gameActive = false; // Pause the game
+  });
+
+  closeButton.addEventListener('click', () => {
+    dialog.style.display = 'none';
+    gameActive = true; // Resume the game
+  });
+
+  // Close dialog when clicking outside
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog) {
+      dialog.style.display = 'none';
+      gameActive = true; // Resume the game
+    }
+  });
 
   updateUI();
 }
@@ -336,10 +492,19 @@ function createUI() {
 function updateUI() {
   const scoreElement = document.getElementById('score-display');
   const massElement = document.getElementById('mass-display');
+  const highScoreElement = document.getElementById('high-score-display');
 
-  if (scoreElement && massElement) {
+  if (scoreElement && massElement && highScoreElement) {
     scoreElement.textContent = `Stars eaten: ${score}`;
-    massElement.textContent = `Black Hole Mass: ${blackHoleMass} M☉`;
+    massElement.textContent = `Mass: ${blackHoleMass} M☉`;
+    highScoreElement.textContent = `Highest Score: ${highScore}`;
+    highScoreElement.style.fontSize = '16px';
+
+    // Check for new high score but don't show message yet
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem(HIGH_SCORE_KEY, highScore.toString());
+    }
   }
 }
 
@@ -497,6 +662,18 @@ function spawnRivalBlackHole(star: THREE.Mesh) {
 function handleGameOver() {
   gameActive = false;
 
+  // Create blurred backdrop
+  const backdrop = document.createElement('div');
+  backdrop.style.position = 'fixed';
+  backdrop.style.top = '0';
+  backdrop.style.left = '0';
+  backdrop.style.width = '100%';
+  backdrop.style.height = '100%';
+  backdrop.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+  backdrop.style.backdropFilter = 'blur(4px)';
+  backdrop.style.zIndex = '999';
+  document.body.appendChild(backdrop);
+
   // Create game over UI
   const gameOverContainer = document.createElement('div');
   gameOverContainer.style.position = 'fixed';
@@ -509,6 +686,10 @@ function handleGameOver() {
   gameOverContainer.style.textAlign = 'center';
   gameOverContainer.style.zIndex = '1000';
   gameOverContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+  gameOverContainer.style.padding = '40px';
+  gameOverContainer.style.borderRadius = '20px';
+  gameOverContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+  gameOverContainer.style.boxShadow = '0 0 30px rgba(0, 0, 0, 0.5)';
 
   const gameOverText = document.createElement('div');
   gameOverText.textContent = 'GAME OVER';
@@ -517,6 +698,11 @@ function handleGameOver() {
   const scoreText = document.createElement('div');
   scoreText.textContent = `Final Score: ${score}`;
   scoreText.style.fontSize = '32px';
+
+  const highScoreText = document.createElement('div');
+  highScoreText.textContent = `Highest Score: ${highScore}`;
+  highScoreText.style.fontSize = '32px';
+  highScoreText.style.marginTop = '10px';
 
   const massText = document.createElement('div');
   massText.textContent = `Your black hole was destroyed!`;
@@ -530,9 +716,15 @@ function handleGameOver() {
 
   gameOverContainer.appendChild(gameOverText);
   gameOverContainer.appendChild(scoreText);
+  gameOverContainer.appendChild(highScoreText);
   gameOverContainer.appendChild(massText);
   gameOverContainer.appendChild(restartText);
   document.body.appendChild(gameOverContainer);
+
+  // Show high score message if a new high score was achieved
+  if (score === highScore && score > parseInt(localStorage.getItem(HIGH_SCORE_KEY) || '0')) {
+    showHighScoreMessage();
+  }
 
   // Add restart handler
   const restartHandler = (event: KeyboardEvent) => {
