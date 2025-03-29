@@ -103,6 +103,7 @@ let elapsedTime = 0;
 let isSlowMo = false;
 let gameActive = true;
 let audioInitialized = false; // Flag to track if audio context is unlocked
+let soundEnabled = true; // Flag to track if sound is enabled
 const stars: THREE.Mesh[] = [];
 const rivalBlackHoles: THREE.Mesh[] = [];
 let lastRivalSpawnScore = 0;
@@ -417,13 +418,13 @@ const cueBorderLineMaterial = new THREE.LineBasicMaterial({
 // --- UI Setup ---
 function createUI() {
   const uiContainer = document.createElement('div');
-  uiContainer.id = 'ui-container'; // Add an ID for easier targeting
+  uiContainer.id = 'ui-container';
   uiContainer.style.position = 'fixed';
   uiContainer.style.top = '20px';
   uiContainer.style.right = '20px';
   uiContainer.style.color = '#ffffff';
   uiContainer.style.fontFamily = 'Arial, sans-serif';
-  uiContainer.style.fontSize = '20px'; // Base font size
+  uiContainer.style.fontSize = '20px';
   uiContainer.style.textAlign = 'right';
   uiContainer.style.zIndex = '1000';
   uiContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
@@ -438,29 +439,74 @@ function createUI() {
   const highScoreElement = document.createElement('div');
   highScoreElement.id = 'high-score-display';
   highScoreElement.style.marginTop = '10px';
-  highScoreElement.style.fontSize = '16px'; // Base high score font size
+  highScoreElement.style.fontSize = '16px';
 
   uiContainer.appendChild(scoreElement);
   uiContainer.appendChild(massElement);
   uiContainer.appendChild(highScoreElement);
   document.body.appendChild(uiContainer);
 
-  // Create info icon
-  const infoIcon = document.createElement('div');
-  infoIcon.id = 'info-icon'; // Add an ID for easier targeting
-  infoIcon.innerHTML = 'ⓘ';
-  infoIcon.style.position = 'fixed';
-  infoIcon.style.top = '20px';
-  infoIcon.style.left = '20px';
-  infoIcon.style.fontSize = '32px'; // Base icon font size
-  infoIcon.style.color = '#ffffff';
-  infoIcon.style.cursor = 'pointer';
-  infoIcon.style.zIndex = '1000';
-  infoIcon.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
-  infoIcon.style.transition = 'transform 0.2s ease';
-  infoIcon.style.userSelect = 'none';
+  // Create three-dot menu button
+  const menuButton = document.createElement('div');
+  menuButton.id = 'menu-button';
+  menuButton.innerHTML = '⋮';
+  menuButton.style.position = 'fixed';
+  menuButton.style.top = '20px';
+  menuButton.style.left = '20px';
+  menuButton.style.fontSize = '32px';
+  menuButton.style.color = '#ffffff';
+  menuButton.style.cursor = 'pointer';
+  menuButton.style.zIndex = '1000';
+  menuButton.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+  menuButton.style.transition = 'transform 0.2s ease';
+  menuButton.style.userSelect = 'none';
 
-  // Create dialog
+  // Create menu container
+  const menuContainer = document.createElement('div');
+  menuContainer.id = 'menu-container';
+  menuContainer.style.position = 'fixed';
+  menuContainer.style.top = '70px';
+  menuContainer.style.left = '20px';
+  menuContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+  menuContainer.style.borderRadius = '10px';
+  menuContainer.style.padding = '10px';
+  menuContainer.style.zIndex = '1001';
+  menuContainer.style.display = 'none';
+  menuContainer.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.2)';
+
+  // Create menu items
+  const soundMenuItem = document.createElement('div');
+  soundMenuItem.className = 'menu-item';
+  soundMenuItem.innerHTML = `
+    <span style="margin-right: 10px;">🔊</span>
+    <span id="sound-text" style="color: #ffffff;">Sound: On</span>
+  `;
+  soundMenuItem.style.padding = '10px';
+  soundMenuItem.style.cursor = 'pointer';
+  soundMenuItem.style.transition = 'all 0.2s ease';
+  soundMenuItem.style.borderRadius = '5px';
+  soundMenuItem.style.color = '#ffffff';
+  soundMenuItem.style.fontSize = '16px';
+
+  const howToPlayMenuItem = document.createElement('div');
+  howToPlayMenuItem.className = 'menu-item';
+  howToPlayMenuItem.innerHTML = `
+    <span style="margin-right: 10px;">❓</span>
+    <span style="color: #ffffff;">How to Play</span>
+  `;
+  howToPlayMenuItem.style.padding = '10px';
+  howToPlayMenuItem.style.cursor = 'pointer';
+  howToPlayMenuItem.style.transition = 'all 0.2s ease';
+  howToPlayMenuItem.style.borderRadius = '5px';
+  howToPlayMenuItem.style.color = '#ffffff';
+  howToPlayMenuItem.style.fontSize = '16px';
+
+  menuContainer.appendChild(soundMenuItem);
+  menuContainer.appendChild(howToPlayMenuItem);
+  document.body.appendChild(menuContainer);
+  document.body.appendChild(menuButton);
+
+  // Create dialog for How to Play
   const dialog = document.createElement('div');
   dialog.style.position = 'fixed';
   dialog.style.top = '50%';
@@ -473,7 +519,7 @@ function createUI() {
   dialog.style.fontFamily = 'Arial, sans-serif';
   dialog.style.maxWidth = '500px';
   dialog.style.width = '90%';
-  dialog.style.zIndex = '1001';
+  dialog.style.zIndex = '1002';
   dialog.style.display = 'none';
   dialog.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.2)';
 
@@ -514,18 +560,36 @@ function createUI() {
   dialog.appendChild(dialogContent);
   dialog.appendChild(closeButton);
   document.body.appendChild(dialog);
-  document.body.appendChild(infoIcon);
 
-  // Add hover effect to info icon
-  infoIcon.addEventListener('mouseenter', () => {
-    infoIcon.style.transform = 'scale(1.2)';
+  // Add hover effects
+  menuButton.addEventListener('mouseenter', () => {
+    menuButton.style.transform = 'scale(1.2)';
   });
 
-  infoIcon.addEventListener('mouseleave', () => {
-    infoIcon.style.transform = 'scale(1)';
+  menuButton.addEventListener('mouseleave', () => {
+    menuButton.style.transform = 'scale(1)';
   });
 
-  // Add hover effect to close button
+  soundMenuItem.addEventListener('mouseenter', () => {
+    soundMenuItem.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
+    soundMenuItem.style.color = '#add8e6';
+  });
+
+  soundMenuItem.addEventListener('mouseleave', () => {
+    soundMenuItem.style.backgroundColor = 'transparent';
+    soundMenuItem.style.color = '#ffffff';
+  });
+
+  howToPlayMenuItem.addEventListener('mouseenter', () => {
+    howToPlayMenuItem.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
+    howToPlayMenuItem.style.color = '#add8e6';
+  });
+
+  howToPlayMenuItem.addEventListener('mouseleave', () => {
+    howToPlayMenuItem.style.backgroundColor = 'transparent';
+    howToPlayMenuItem.style.color = '#ffffff';
+  });
+
   closeButton.addEventListener('mouseenter', () => {
     closeButton.style.backgroundColor = '#ffffff';
   });
@@ -534,44 +598,75 @@ function createUI() {
     closeButton.style.backgroundColor = '#add8e6';
   });
 
-  // Handle dialog open/close
-  infoIcon.addEventListener('click', () => {
-    dialog.style.display = 'block';
-    gameActive = false; // Pause the game
+  // Handle menu toggle
+  menuButton.addEventListener('click', () => {
+    menuContainer.style.display = menuContainer.style.display === 'none' ? 'block' : 'none';
   });
 
+  // Handle sound toggle
+  soundMenuItem.addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    const soundText = document.getElementById('sound-text');
+    if (soundText) {
+      soundText.textContent = `Sound: ${soundEnabled ? 'On' : 'Off'}`;
+    }
+
+    // Update audio volumes
+    backgroundMusic.volume = soundEnabled ? 0.1 : 0;
+    starCatchSound.volume = soundEnabled ? 0.1 : 0;
+    rivalCollisionSound.volume = soundEnabled ? 0.3 : 0;
+    gameOverSound.volume = soundEnabled ? 0.3 : 0;
+  });
+
+  // Handle How to Play click
+  howToPlayMenuItem.addEventListener('click', () => {
+    menuContainer.style.display = 'none';
+    dialog.style.display = 'block';
+    gameActive = false;
+  });
+
+  // Handle dialog close
   closeButton.addEventListener('click', () => {
     dialog.style.display = 'none';
-    gameActive = true; // Resume the game
+    gameActive = true;
   });
 
   // Close dialog when clicking outside
   dialog.addEventListener('click', (e) => {
     if (e.target === dialog) {
       dialog.style.display = 'none';
-      gameActive = true; // Resume the game
+      gameActive = true;
+    }
+  });
+
+  // Close menu when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!menuButton.contains(e.target as Node) && !menuContainer.contains(e.target as Node)) {
+      menuContainer.style.display = 'none';
     }
   });
 
   // Add Media Query Styles
   const styleSheet = document.createElement('style');
   styleSheet.textContent = `
-    @media (max-width: 768px) { /* Adjust breakpoint as needed */
+    @media (max-width: 768px) {
       #ui-container {
-        font-size: 12px; /* Smaller font for score/mass */
+        font-size: 12px;
         top: 10px;
         right: 10px;
       }
       #high-score-display {
-         font-size: 12px; /* Smaller font for high score */
+        font-size: 12px;
       }
-      #info-icon {
-        font-size: 24px; /* Smaller info icon */
+      #menu-button {
+        font-size: 24px;
         top: 10px;
         left: 10px;
       }
-       /* Adjust dialog padding for smaller screens */
-      /* You might want to add more dialog adjustments here */
+      #menu-container {
+        top: 50px;
+        left: 10px;
+      }
     }
   `;
   document.head.appendChild(styleSheet);
@@ -759,10 +854,7 @@ function handleGameOver() {
   gameActive = false;
 
   // Play game over sound
-  gameOverSound.currentTime = 0;
-  gameOverSound.play().catch((error) => {
-    console.warn('Could not play game over sound:', error);
-  });
+  playSound(gameOverSound);
 
   // Create blurred backdrop
   const backdrop = document.createElement('div');
@@ -945,10 +1037,7 @@ function checkCollisions() {
           score++;
 
           // Play star catch sound
-          starCatchSound.currentTime = 0;
-          starCatchSound.play().catch((error) => {
-            console.warn('Could not play star catch sound:', error);
-          });
+          playSound(starCatchSound);
 
           // Check if we should increase speed and mass
           if (score - lastSpeedIncreaseScore >= SPEED_INCREASE_INTERVAL) {
@@ -1045,10 +1134,7 @@ function checkCollisions() {
         // Check for collision with rival black hole
         if (distanceSq <= maxCollisionDistSq * 1.2) {
           // Play rival collision sound
-          rivalCollisionSound.currentTime = 0;
-          rivalCollisionSound.play().catch((error) => {
-            console.warn('Could not play rival collision sound:', error);
-          });
+          playSound(rivalCollisionSound);
 
           // Reduce player's mass
           blackHoleMass = Math.max(0, blackHoleMass - RIVAL_BLACK_HOLE_DAMAGE);
@@ -1327,29 +1413,33 @@ function initializeAudio() {
   console.log('Initializing audio...');
 
   // Try playing background music
-  backgroundMusic.play().catch((error) => {
-    console.warn('Could not play background music initially:', error);
-    // Attempt to resume context if needed (often required by browsers)
-    const context = new (window.AudioContext || (window as any).webkitAudioContext)();
-    if (context.state === 'suspended') {
-      context.resume();
-    }
-  });
+  if (soundEnabled) {
+    backgroundMusic.play().catch((error) => {
+      console.warn('Could not play background music initially:', error);
+      // Attempt to resume context if needed (often required by browsers)
+      const context = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (context.state === 'suspended') {
+        context.resume();
+      }
+    });
+  }
 
   // Unlock sound effects by playing and pausing them (or playing silent sound)
   // This helps ensure they can play later on mobile
-  starCatchSound
-    .play()
-    .then(() => starCatchSound.pause())
-    .catch(() => {});
-  rivalCollisionSound
-    .play()
-    .then(() => rivalCollisionSound.pause())
-    .catch(() => {});
-  gameOverSound
-    .play()
-    .then(() => gameOverSound.pause())
-    .catch(() => {});
+  if (soundEnabled) {
+    starCatchSound
+      .play()
+      .then(() => starCatchSound.pause())
+      .catch(() => {});
+    rivalCollisionSound
+      .play()
+      .then(() => rivalCollisionSound.pause())
+      .catch(() => {});
+    gameOverSound
+      .play()
+      .then(() => gameOverSound.pause())
+      .catch(() => {});
+  }
 
   audioInitialized = true;
   console.log('Audio initialized.');
@@ -1413,3 +1503,13 @@ window.addEventListener('beforeunload', () => {
     damageOverlay = null;
   }
 });
+
+// Function to play sound if enabled
+function playSound(sound: HTMLAudioElement) {
+  if (soundEnabled) {
+    sound.currentTime = 0;
+    sound.play().catch((error) => {
+      console.warn('Could not play sound:', error);
+    });
+  }
+}
