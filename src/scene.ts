@@ -14,10 +14,13 @@ backgroundMusic.volume = 0.1; // Set initial volume to 30% to make room for soun
 
 // Sound effects
 const starCatchSound = new Audio('/star-catch.mp3');
-starCatchSound.volume = 0.3;
+starCatchSound.volume = 0.1;
 
 const rivalCollisionSound = new Audio('/rival-collision.mp3');
 rivalCollisionSound.volume = 0.3;
+
+const gameOverSound = new Audio('/game-over.mp3');
+gameOverSound.volume = 0.3;
 
 // --- CONFIGURATION (Keep all config constants) ---
 const PARTICLE_COUNT = 4000;
@@ -64,6 +67,10 @@ const RIVAL_BLACK_HOLE_DAMAGE = 1; // Amount of mass lost when colliding with a 
 // --- UI Constants ---
 const INITIAL_BLACK_HOLE_MASS = 1; // Initial mass in solar masses (whole number)
 const MASS_INCREASE_AMOUNT = 1; // Mass increase per 15 stars (whole number)
+
+// --- Player Tilt ---
+const PLAYER_TILT_FACTOR = 0.05; // How much to tilt based on X position
+const MAX_PLAYER_TILT_ANGLE = Math.PI / 12; // Max tilt angle (15 degrees)
 
 // --- Colors ---
 const FLASH_COLOR = new THREE.Color(0xadd8e6); // Light Blue Flash
@@ -567,11 +574,12 @@ window.addEventListener('keydown', (event) => {
   if (event.code === 'Space' && !isSlowMo && gameActive) {
     isSlowMo = true;
     gsap.to(
-      { speed: gameSpeed },
+      {},
       {
-        speed: BASE_GAME_SPEED * SLOW_MO_FACTOR,
         duration: 0.2,
-        onUpdate: (tween) => (gameSpeed = tween.targets()[0].speed),
+        onUpdate: () => {
+          gameSpeed = BASE_GAME_SPEED * SLOW_MO_FACTOR;
+        },
       }
     );
     gsap.to(bloomPass, {
@@ -585,12 +593,13 @@ window.addEventListener('keyup', (event) => {
   if (event.code === 'Space' && isSlowMo && gameActive) {
     isSlowMo = false;
     gsap.to(
-      { speed: gameSpeed },
+      {},
       {
-        speed: BASE_GAME_SPEED,
         duration: 0.5,
         ease: 'power1.out',
-        onUpdate: (tween) => (gameSpeed = tween.targets()[0].speed),
+        onUpdate: () => {
+          gameSpeed = BASE_GAME_SPEED;
+        },
       }
     );
     gsap.to(bloomPass, {
@@ -661,6 +670,12 @@ function spawnRivalBlackHole(star: THREE.Mesh) {
 // --- Game Over Function ---
 function handleGameOver() {
   gameActive = false;
+
+  // Play game over sound
+  gameOverSound.currentTime = 0;
+  gameOverSound.play().catch((error) => {
+    console.warn('Could not play game over sound:', error);
+  });
 
   // Create blurred backdrop
   const backdrop = document.createElement('div');
@@ -1041,13 +1056,25 @@ const animate = () => {
   if (gameActive) {
     const effectiveSpeed = gameSpeed * deltaTime;
 
-    // Update Player
+    // Update Player Position
     const targetX = mousePosition.x * BLACK_HOLE_MOVEMENT_BOUNDS_X;
     const targetY = mousePosition.y * BLACK_HOLE_MOVEMENT_BOUNDS_Y;
     gsap.to(playerGroup.position, {
       x: targetX,
       y: targetY,
       duration: 0.15,
+      ease: 'power1.out',
+      overwrite: true,
+    });
+
+    // Update Player Tilt based on horizontal position
+    const targetRotationZ = Math.max(
+      -MAX_PLAYER_TILT_ANGLE,
+      Math.min(MAX_PLAYER_TILT_ANGLE, -playerGroup.position.x * PLAYER_TILT_FACTOR)
+    );
+    gsap.to(playerGroup.rotation, {
+      z: targetRotationZ,
+      duration: 0.2,
       ease: 'power1.out',
       overwrite: true,
     });
@@ -1192,6 +1219,8 @@ window.addEventListener('beforeunload', () => {
   starCatchSound.currentTime = 0;
   rivalCollisionSound.pause();
   rivalCollisionSound.currentTime = 0;
+  gameOverSound.pause();
+  gameOverSound.currentTime = 0;
 
   cueBorderPlaneGeometry.dispose();
   cueBorderEdgesGeometry.dispose();
