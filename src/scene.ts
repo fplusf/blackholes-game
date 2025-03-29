@@ -21,7 +21,7 @@ const BLACK_HOLE_MOVEMENT_BOUNDS_X = 7;
 const BLACK_HOLE_MOVEMENT_BOUNDS_Y = 3.5;
 const BASE_GAME_SPEED = 25.0; // Increased from 18.0 to 25.0 for faster starting speed
 const SLOW_MO_FACTOR = 0.2;
-const SPEED_INCREASE_INTERVAL = 15; // Number of stars needed to trigger speed increase
+const SPEED_INCREASE_INTERVAL = 10; // Number of stars needed to trigger speed increase
 const SPEED_INCREASE_AMOUNT = 3.0; // Amount to increase speed by
 const MAX_GAME_SPEED = 45.0; // Maximum speed cap
 const SPAWN_DISTANCE_Z = -80;
@@ -38,12 +38,29 @@ const CUE_BORDER_FADE_START_Z = -20.0;
 const CUE_BORDER_FADE_END_Z = -5.0;
 const COLLISION_RING_FORGIVENESS = 0.4; // Added to make collision detection more forgiving
 
+// --- Rival Black Hole Constants ---
+const RIVAL_BLACK_HOLE_COUNT = 2; // Maximum number of rivals
+const INITIAL_RIVAL_BLACK_HOLE_COUNT = 0; // Start with no rivals
+const RIVAL_BLACK_HOLE_MIN_SPAWN_INTERVAL = 2; // Minimum stars between spawns (reduced from 5)
+const RIVAL_BLACK_HOLE_MAX_SPAWN_INTERVAL = 10; // Maximum stars between spawns
+const RIVAL_BLACK_HOLE_COLOR = new THREE.Color(0xff0000); // Red color for rival black holes
+const RIVAL_BLACK_HOLE_WARNING_COLOR = new THREE.Color(0xff6600); // Orange color for warning effect
+const RIVAL_BLACK_HOLE_WARNING_DURATION = 1.0; // Duration of warning flash in seconds
+const RIVAL_BLACK_HOLE_WARNING_INTERVAL = 0.5; // Interval between warning flashes in seconds
+const RIVAL_BLACK_HOLE_OFFSET_Z = 3; // Reduced Z-offset to make it more challenging
+const RIVAL_BLACK_HOLE_SPAWN_CHANCE = 0.7; // 70% chance to spawn when conditions are met
+const RIVAL_BLACK_HOLE_CLEANUP_Z = 5; // Cleanup Z position (before CLEANUP_DISTANCE_Z)
+const RIVAL_BLACK_HOLE_INCREASE_INTERVAL = 20; // Number of stars needed to increase rival count
+const RIVAL_BLACK_HOLE_INCREASE_AMOUNT = 1; // Number of rivals to add when increasing
+const RIVAL_BLACK_HOLE_DAMAGE = 1; // Amount of mass lost when colliding with a rival
+
 // --- UI Constants ---
 const INITIAL_BLACK_HOLE_MASS = 1; // Initial mass in solar masses (whole number)
 const MASS_INCREASE_AMOUNT = 1; // Mass increase per 15 stars (whole number)
 
 // --- Colors ---
 const FLASH_COLOR = new THREE.Color(0xADD8E6); // Light Blue Flash
+const DAMAGE_FLASH_COLOR = new THREE.Color(0xff0000); // Red Flash for damage
 const STAR_COLOR = new THREE.Color(0xffffff);
 const BACKGROUND_COLOR = new THREE.Color(0x000000);
 const FOG_COLOR = BACKGROUND_COLOR;
@@ -57,6 +74,11 @@ let elapsedTime = 0;
 let isSlowMo = false;
 let gameActive = true;
 const stars: THREE.Mesh[] = [];
+const rivalBlackHoles: THREE.Mesh[] = [];
+let lastRivalSpawnScore = 0;
+let gameOver = false;
+let currentMaxRivals = INITIAL_RIVAL_BLACK_HOLE_COUNT; // Track current maximum number of rivals
+let damageOverlay: HTMLDivElement | null = null; // Track the damage overlay element
 
 // --- Black Hole Shaders ---
 const blackHoleVertexShader = `
@@ -290,11 +312,9 @@ function updateUI() {
 
 // --- Star Spawning ---
 function spawnStar() {
-  if (stars.length > 0) return;
-  
   const star = new THREE.Mesh(starGeometry, starMaterial.clone());
-  const spawnAreaX = BLACK_HOLE_MOVEMENT_BOUNDS_X * 2.0; // Increased from 1.5
-  const spawnAreaY = BLACK_HOLE_MOVEMENT_BOUNDS_Y * 2.0; // Increased from 1.5
+  const spawnAreaX = BLACK_HOLE_MOVEMENT_BOUNDS_X * 2.0;
+  const spawnAreaY = BLACK_HOLE_MOVEMENT_BOUNDS_Y * 2.0;
   const initialX = (Math.random() - 0.5) * spawnAreaX * 2;
   const initialY = (Math.random() - 0.5) * spawnAreaY * 2;
   const initialZ = SPAWN_DISTANCE_Z - Math.random() * 30;
@@ -305,7 +325,7 @@ function spawnStar() {
   
   // Modified target position calculation to create more diverse paths
   const targetAngle = Math.random() * Math.PI * 2;
-  const targetRadius = STAR_TARGET_RADIUS * (0.5 + Math.random() * 0.5); // Random radius between 50% and 100% of STAR_TARGET_RADIUS
+  const targetRadius = STAR_TARGET_RADIUS * (0.5 + Math.random() * 0.5);
   const targetX = Math.cos(targetAngle) * targetRadius;
   const targetY = Math.sin(targetAngle) * targetRadius;
   const targetPos = new THREE.Vector3(targetX, targetY, 0);
@@ -327,11 +347,21 @@ function spawnStar() {
     direction: direction,
     cueBorder: cueBorder,
     cueOffsetX: cueOffsetX,
-    cueOffsetY: cueOffsetY
+    cueOffsetY: cueOffsetY,
+    targetPos: targetPos.clone()
   };
   
   scene.add(star);
   stars.push(star);
+  
+  // Check if we should spawn a rival black hole
+  if (score >= lastRivalSpawnScore + RIVAL_BLACK_HOLE_MIN_SPAWN_INTERVAL) {
+    const shouldSpawn = Math.random() < RIVAL_BLACK_HOLE_SPAWN_CHANCE;
+    if (shouldSpawn) {
+      spawnRivalBlackHole(star);
+      lastRivalSpawnScore = score;
+    }
+  }
 }
 
 // --- Input Handling (Slow-motion) ---
@@ -366,9 +396,141 @@ window.addEventListener('keyup', (event) => {
   }
 });
 
+// --- Rival Black Hole Spawning ---
+function spawnRivalBlackHole(star: THREE.Mesh) {
+  if (rivalBlackHoles.length >= currentMaxRivals) return;
+  
+  // Create a consistent material for all rival black holes
+  const rivalMaterial = new THREE.ShaderMaterial({
+    vertexShader: blackHoleVertexShader,
+    fragmentShader: blackHoleFragmentShader,
+    uniforms: {
+      uTexture: { value: blackHoleTexture },
+      uIntensity: { value: 1.15 },
+      uFlashColor: { value: RIVAL_BLACK_HOLE_COLOR },
+      uFlashIntensity: { value: 0.0 },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  
+  const rivalBlackHole = new THREE.Mesh(
+    blackHoleGeometry,
+    rivalMaterial
+  );
+  
+  // Spawn position near the star at the same Z distance
+  const starPos = star.position;
+  const starTarget = star.userData.targetPos as THREE.Vector3;
+  
+  // Calculate position with more random offset
+  const offsetAngle = Math.random() * Math.PI * 2;
+  const offsetDistance = STAR_OUTER_RADIUS * (1.5 + Math.random() * 2); // Random offset between 1.5 and 3.5 star diameters
+  const offsetX = Math.cos(offsetAngle) * offsetDistance;
+  const offsetY = Math.sin(offsetAngle) * offsetDistance;
+  
+  // Spawn at the same Z distance as the star
+  const initialX = starPos.x + offsetX;
+  const initialY = starPos.y + offsetY;
+  const initialZ = SPAWN_DISTANCE_Z - Math.random() * 30; // Same Z range as stars
+  
+  rivalBlackHole.position.set(initialX, initialY, initialZ);
+  const initialPos = rivalBlackHole.position.clone();
+  
+  // Calculate target position with slight variation from star's path
+  const targetVariation = 0.5 + Math.random() * 0.5; // Random variation between 0.5 and 1.0
+  const targetX = starTarget.x + offsetX * targetVariation;
+  const targetY = starTarget.y + offsetY * targetVariation;
+  const targetPos = new THREE.Vector3(targetX, targetY, 0);
+  const direction = targetPos.clone().sub(initialPos).normalize();
+  
+  rivalBlackHole.userData = {
+    previousPosition: initialPos.clone(),
+    direction: direction,
+    lastWarningTime: 0,
+    associatedStar: star, // Reference to the associated star
+    speedMultiplier: 1.5 // Make rival black holes move 50% faster than stars
+  };
+  
+  scene.add(rivalBlackHole);
+  rivalBlackHoles.push(rivalBlackHole);
+}
+
+// --- Game Over Function ---
+function handleGameOver() {
+  gameOver = true;
+  gameActive = false;
+  
+  // Create game over UI
+  const gameOverContainer = document.createElement('div');
+  gameOverContainer.style.position = 'fixed';
+  gameOverContainer.style.top = '50%';
+  gameOverContainer.style.left = '50%';
+  gameOverContainer.style.transform = 'translate(-50%, -50%)';
+  gameOverContainer.style.color = '#ffffff';
+  gameOverContainer.style.fontFamily = 'Arial, sans-serif';
+  gameOverContainer.style.fontSize = '48px';
+  gameOverContainer.style.textAlign = 'center';
+  gameOverContainer.style.zIndex = '1000';
+  gameOverContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+  
+  const gameOverText = document.createElement('div');
+  gameOverText.textContent = 'GAME OVER';
+  gameOverText.style.marginBottom = '20px';
+  
+  const scoreText = document.createElement('div');
+  scoreText.textContent = `Final Score: ${score}`;
+  scoreText.style.fontSize = '32px';
+  
+  const massText = document.createElement('div');
+  massText.textContent = `Your black hole was destroyed!`;
+  massText.style.fontSize = '24px';
+  massText.style.marginTop = '10px';
+  
+  const restartText = document.createElement('div');
+  restartText.textContent = 'Press R to Restart';
+  restartText.style.fontSize = '24px';
+  restartText.style.marginTop = '20px';
+  
+  gameOverContainer.appendChild(gameOverText);
+  gameOverContainer.appendChild(scoreText);
+  gameOverContainer.appendChild(massText);
+  gameOverContainer.appendChild(restartText);
+  document.body.appendChild(gameOverContainer);
+  
+  // Add restart handler
+  const restartHandler = (event: KeyboardEvent) => {
+    if (event.code === 'KeyR') {
+      window.location.reload();
+    }
+  };
+  window.addEventListener('keydown', restartHandler);
+}
+
 // --- Collision Detection ---
 const FLASH_INTENSITY_MAX = 1.8;
 const FLASH_DURATION = 0.30;
+
+// Add this function to create the damage overlay
+function createDamageOverlay() {
+  const overlay = document.createElement('div');
+  overlay.style.position = 'fixed';
+  overlay.style.top = '0';
+  overlay.style.left = '0';
+  overlay.style.bottom = '0';
+  overlay.style.right = '0';
+  overlay.style.width = '100%';
+  overlay.style.height = '100%';
+  overlay.style.border = '4px solid #ff0000';
+  overlay.style.opacity = '0';
+  overlay.style.transition = 'opacity 0.2s ease-out';
+  overlay.style.pointerEvents = 'none';
+  overlay.style.zIndex = '1000';
+  overlay.style.boxShadow = '0 0 20px #ff0000';
+  document.body.appendChild(overlay);
+  return overlay;
+}
 
 function checkCollisions() {
   const starEffectiveRadius = STAR_OUTER_RADIUS * COLLISION_THRESHOLD_XY_FACTOR;
@@ -380,6 +542,7 @@ function checkCollisions() {
   const maxCollisionDistSq = maxCollisionDist * maxCollisionDist;
   const blackHoleZPlane = playerGroup.position.z;
   
+  // Check star collisions
   for (let i = stars.length - 1; i >= 0; i--) {
     const star = stars[i];
     if (!star || !star.userData || !(star.userData.previousPosition instanceof THREE.Vector3) || 
@@ -416,7 +579,7 @@ function checkCollisions() {
         const dx = playerX - cueCenterX;
         const dy = playerY - cueCenterY;
         const distanceToCueCenter = Math.sqrt(dx * dx + dy * dy);
-        const maxAllowedDistance = cueBorderHalfSize * COLLISION_RING_FORGIVENESS; // More forgiving distance check
+        const maxAllowedDistance = cueBorderHalfSize * COLLISION_RING_FORGIVENESS;
         
         // Check if player is within the cue border with more forgiving bounds
         const isPlayerInCueBorder = distanceToCueCenter <= maxAllowedDistance;
@@ -425,8 +588,8 @@ function checkCollisions() {
         const dxToStar = intersectX - playerX;
         const dyToStar = intersectY - playerY;
         const distanceSq = dxToStar * dxToStar + dyToStar * dyToStar;
-        const isWithinCollisionRing = (distanceSq >= minCollisionDistSq * 0.8 && // More forgiving inner radius
-                                      distanceSq <= maxCollisionDistSq * 1.2);   // More forgiving outer radius
+        const isWithinCollisionRing = (distanceSq >= minCollisionDistSq * 0.8 &&
+                                      distanceSq <= maxCollisionDistSq * 1.2);
         
         // Trigger catch if either condition is met with more forgiving checks
         if (isPlayerInCueBorder || isWithinCollisionRing) {
@@ -448,6 +611,11 @@ function checkCollisions() {
                 repeat: 1
               });
             }
+          }
+          
+          // Check if we should increase rival count
+          if (score % RIVAL_BLACK_HOLE_INCREASE_INTERVAL === 0) {
+            currentMaxRivals = Math.min(currentMaxRivals + RIVAL_BLACK_HOLE_INCREASE_AMOUNT, RIVAL_BLACK_HOLE_COUNT);
           }
           
           // Update UI
@@ -490,6 +658,112 @@ function checkCollisions() {
       }
     }
     if (star.userData.previousPosition) {
+      prevPos.copy(currPos);
+    }
+  }
+  
+  // Check rival black hole collisions
+  for (let i = rivalBlackHoles.length - 1; i >= 0; i--) {
+    const rival = rivalBlackHoles[i];
+    if (!rival || !rival.userData || !(rival.userData.previousPosition instanceof THREE.Vector3)) continue;
+    
+    const prevPos = rival.userData.previousPosition as THREE.Vector3;
+    const currPos = rival.position;
+    
+    if (prevPos.z < blackHoleZPlane && currPos.z >= blackHoleZPlane) {
+      const zMovement = currPos.z - prevPos.z;
+      if (zMovement > 1e-6) {
+        const tZCrossing = (blackHoleZPlane - prevPos.z) / zMovement;
+        const intersectX = prevPos.x + (currPos.x - prevPos.x) * tZCrossing;
+        const intersectY = prevPos.y + (currPos.y - prevPos.y) * tZCrossing;
+        
+        const playerX = playerGroup.position.x;
+        const playerY = playerGroup.position.y;
+        const dxToRival = intersectX - playerX;
+        const dyToRival = intersectY - playerY;
+        const distanceSq = dxToRival * dxToRival + dyToRival * dyToRival;
+        
+        // Check for collision with rival black hole
+        if (distanceSq <= maxCollisionDistSq * 1.2) {
+          // Reduce player's mass
+          blackHoleMass = Math.max(0, blackHoleMass - RIVAL_BLACK_HOLE_DAMAGE);
+          
+          // Visual feedback for damage
+          gsap.to(bloomPass, {
+            strength: ORIGINAL_BLOOM_STRENGTH * 1.5,
+            duration: 0.2,
+            yoyo: true,
+            repeat: 1
+          });
+
+          // Red flash effect
+          gsap.killTweensOf(blackHoleMaterial.uniforms.uFlashColor);
+          blackHoleMaterial.uniforms.uFlashColor.value = DAMAGE_FLASH_COLOR;
+          blackHoleMaterial.uniforms.uFlashIntensity.value = FLASH_INTENSITY_MAX;
+          gsap.to(blackHoleMaterial.uniforms.uFlashIntensity, {
+            value: 0.0,
+            duration: FLASH_DURATION,
+            ease: 'power2.out',
+            onComplete: () => {
+              blackHoleMaterial.uniforms.uFlashColor.value = FLASH_COLOR;
+            }
+          });
+
+          // Shake effect
+          const originalX = playerGroup.position.x;
+          const originalY = playerGroup.position.y;
+          const shakeAmount = 0.3;
+          const shakeDuration = 0.2;
+          
+          gsap.to(playerGroup.position, {
+            x: originalX + (Math.random() - 0.5) * shakeAmount,
+            y: originalY + (Math.random() - 0.5) * shakeAmount,
+            duration: shakeDuration / 4,
+            yoyo: true,
+            repeat: 3,
+            ease: 'power1.inOut',
+            onComplete: () => {
+              gsap.to(playerGroup.position, {
+                x: originalX,
+                y: originalY,
+                duration: 0.1
+              });
+            }
+          });
+
+          // Red border overlay effect
+          if (!damageOverlay) {
+            damageOverlay = createDamageOverlay();
+          }
+          
+          // Show the overlay
+          damageOverlay.style.opacity = '1';
+          
+          // Hide the overlay after a short delay
+          setTimeout(() => {
+            if (damageOverlay) {
+              damageOverlay.style.opacity = '0';
+            }
+          }, 200);
+          
+          // Update UI
+          updateUI();
+          
+          // Remove the rival black hole
+          scene.remove(rival);
+          rivalBlackHoles.splice(i, 1);
+          (rival.material as THREE.Material).dispose();
+          
+          // Check if game should end
+          if (blackHoleMass <= 0) {
+            handleGameOver();
+            return;
+          }
+        }
+      }
+    }
+    
+    if (rival.userData.previousPosition) {
       prevPos.copy(currPos);
     }
   }
@@ -559,11 +833,42 @@ const animate = () => {
         const cueBorderToDispose = star.userData.cueBorder as THREE.LineSegments;
         scene.remove(star);
         stars.splice(i, 1);
-        spawnStar();
+        // Only spawn a new star if we're below the maximum number of stars
+        if (stars.length < 3) { // Allow up to 3 stars at once
+          spawnStar();
+        }
         (star.material as THREE.Material).dispose();
         if (cueBorderToDispose) {
           (cueBorderToDispose.material as THREE.Material).dispose();
         }
+        break;
+      }
+    }
+    
+    // Update Rival Black Holes
+    for (let i = rivalBlackHoles.length - 1; i >= 0; i--) {
+      const rival = rivalBlackHoles[i];
+      if (!rival.userData || !(rival.userData.direction instanceof THREE.Vector3)) continue;
+      
+      const direction = rival.userData.direction as THREE.Vector3;
+      
+      // Move Rival Black Hole with increased speed
+      const rivalSpeed = effectiveSpeed * rival.userData.speedMultiplier;
+      rival.position.addScaledVector(direction, rivalSpeed);
+      const currentZ = rival.position.z;
+      
+      // Rotate Rival Black Hole
+      rival.rotation.z += deltaTime * (isSlowMo ? 0.05 : 0.25);
+      
+      // Cleanup Rival Black Hole
+      if (currentZ > RIVAL_BLACK_HOLE_CLEANUP_Z) {
+        scene.remove(rival);
+        rivalBlackHoles.splice(i, 1);
+        // Only spawn a new rival if there's an active star and we're below the max count
+        if (stars.length > 0 && rivalBlackHoles.length < currentMaxRivals) {
+          spawnRivalBlackHole(stars[0]);
+        }
+        (rival.material as THREE.Material).dispose();
         break;
       }
     }
@@ -596,7 +901,10 @@ window.addEventListener('resize', () => {
 
 // --- Start Game ---
 createUI();
-spawnStar();
+// Spawn initial stars
+for (let i = 0; i < 3; i++) {
+  spawnStar();
+}
 animate();
 
 // --- Cleanup Shared Resources ---
@@ -612,4 +920,23 @@ window.addEventListener('beforeunload', () => {
   blackHoleGeometry.dispose();
   blackHoleMaterial.dispose();
   if (blackHoleTexture) blackHoleTexture.dispose();
+  
+  // Cleanup rival black holes
+  for (const rival of rivalBlackHoles) {
+    if (rival.userData && rival.userData.warningBorder) {
+      const warningBorder = rival.userData.warningBorder as THREE.LineSegments;
+      if (warningBorder.material) {
+        (warningBorder.material as THREE.Material).dispose();
+      }
+    }
+    if (rival.material) {
+      (rival.material as THREE.Material).dispose();
+    }
+  }
+
+  // Cleanup damage overlay
+  if (damageOverlay) {
+    damageOverlay.remove();
+    damageOverlay = null;
+  }
 });
