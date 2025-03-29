@@ -102,6 +102,7 @@ let blackHoleMass = INITIAL_BLACK_HOLE_MASS;
 let elapsedTime = 0;
 let isSlowMo = false;
 let gameActive = true;
+let audioInitialized = false; // Flag to track if audio context is unlocked
 const stars: THREE.Mesh[] = [];
 const rivalBlackHoles: THREE.Mesh[] = [];
 let lastRivalSpawnScore = 0;
@@ -1146,27 +1147,44 @@ const animate = () => {
     let targetX = mousePosition.x * BLACK_HOLE_MOVEMENT_BOUNDS_X;
     let targetY: number;
 
+    // Calculate the visible half-height at the player's Z-plane (z=0)
+    // This is needed for both mobile Y calculation and the offset
+    const halfVisibleHeight =
+      Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z;
+
     if (isMobile) {
       // Map mouse Y from [-1 (bottom), 1 (top)] to [-new_bottom_bound, top_bound]
       const topBound = BLACK_HOLE_MOVEMENT_BOUNDS_Y; // Keep original top bound
 
-      // Calculate the visible half-height at the player's Z-plane (z=0)
-      // Uses vertical FOV and camera distance
-      const halfVisibleHeight =
-        Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z;
-
       // Calculate the desired bottom bound for the black hole's *center*
-      // so its bottom edge touches the screen's bottom edge
+      // so its bottom edge might be near the screen's bottom edge initially
+      // (We clamp later to ensure it stays fully visible)
       const newBottomBound = halfVisibleHeight - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2;
 
       // Perform linear mapping: targetY = a * mousePosition.y + b
       // Where: -1 maps to -newBottomBound, and 1 maps to topBound
       const a = (topBound + newBottomBound) / 2; // Slope
       const b = (topBound - newBottomBound) / 2; // Y-intercept
-      targetY = a * mousePosition.y + b;
+      let mappedY = a * mousePosition.y + b; // Calculate the mapped Y based on touch
+
+      // Calculate the offset corresponding to 20 pixels in game units
+      const pixelsToOffset = 40;
+      const yOffsetInGameUnits = pixelsToOffset * ((2 * halfVisibleHeight) / sizes.height);
+
+      // Apply the offset
+      targetY = mappedY + yOffsetInGameUnits;
+
+      // Clamp targetY vertically to prevent going off-screen, ensuring the *entire*
+      // black hole stays within the vertical bounds.
+      const effectiveTopBound = topBound - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0;
+      const effectiveBottomBound = -newBottomBound; // Already calculated based on size
+      targetY = Math.max(effectiveBottomBound, Math.min(effectiveTopBound, targetY));
     } else {
       // Original calculation for desktop
       targetY = mousePosition.y * BLACK_HOLE_MOVEMENT_BOUNDS_Y;
+      // Optional: Add vertical clamping for desktop if needed
+      // const effectiveBoundY = BLACK_HOLE_MOVEMENT_BOUNDS_Y - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0;
+      // targetY = Math.max(-effectiveBoundY, Math.min(effectiveBoundY, targetY));
     }
 
     // Clamp horizontal movement accounting for black hole size
@@ -1301,10 +1319,50 @@ const animate = () => {
 
 // --- Start Game ---
 createUI();
-// Start background music
-backgroundMusic.play().catch((error) => {
-  console.warn('Could not play background music:', error);
-});
+
+// Function to initialize audio after user interaction
+function initializeAudio() {
+  if (audioInitialized) return;
+
+  console.log('Initializing audio...');
+
+  // Try playing background music
+  backgroundMusic.play().catch((error) => {
+    console.warn('Could not play background music initially:', error);
+    // Attempt to resume context if needed (often required by browsers)
+    const context = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (context.state === 'suspended') {
+      context.resume();
+    }
+  });
+
+  // Unlock sound effects by playing and pausing them (or playing silent sound)
+  // This helps ensure they can play later on mobile
+  starCatchSound
+    .play()
+    .then(() => starCatchSound.pause())
+    .catch(() => {});
+  rivalCollisionSound
+    .play()
+    .then(() => rivalCollisionSound.pause())
+    .catch(() => {});
+  gameOverSound
+    .play()
+    .then(() => gameOverSound.pause())
+    .catch(() => {});
+
+  audioInitialized = true;
+  console.log('Audio initialized.');
+
+  // Remove the listener after the first interaction
+  document.body.removeEventListener('pointerdown', initializeAudio);
+  document.body.removeEventListener('touchstart', initializeAudio);
+}
+
+// Add event listeners for the first user interaction
+document.body.addEventListener('pointerdown', initializeAudio, { once: true });
+document.body.addEventListener('touchstart', initializeAudio, { once: true });
+
 // Spawn initial stars
 for (let i = 0; i < 3; i++) {
   spawnStar();
