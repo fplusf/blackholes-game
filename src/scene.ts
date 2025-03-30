@@ -1,4 +1,7 @@
-// src/main.ts (or scene.ts)
+// TODO:
+// + Add a "game over" screen with a "restart" button
+// + Create a controller for the black hole on mobile (similar to pieter's game)
+// - Add a "leaderboard" screen
 
 // --- IMPORTS (Keep all imports) ---
 import { gsap } from 'gsap';
@@ -55,7 +58,7 @@ const COLLISION_RING_FORGIVENESS = 0.4;
 
 // --- Rival Black Hole Constants ---
 const RIVAL_BLACK_HOLE_COUNT = 2; // Maximum number of rivals
-const INITIAL_RIVAL_BLACK_HOLE_COUNT = 0; // Start with no rivals
+const INITIAL_RIVAL_BLACK_HOLE_COUNT = 1; // Start with no rivals
 const RIVAL_BLACK_HOLE_MIN_SPAWN_INTERVAL = 2; // Minimum stars between spawns (reduced from 5)
 const RIVAL_BLACK_HOLE_COLOR = new THREE.Color(0xff0000); // Red color for rival black holes
 const RIVAL_BLACK_HOLE_SPAWN_CHANCE = 0.7; // 70% chance to spawn when conditions are met
@@ -66,7 +69,7 @@ const RIVAL_BLACK_HOLE_DAMAGE = 1; // Amount of mass lost when colliding with a 
 
 // --- UI Constants ---
 const INITIAL_BLACK_HOLE_MASS = 1; // Initial mass in solar masses (whole number)
-const MASS_INCREASE_AMOUNT = 1; // Mass increase per 15 stars (whole number)
+const MASS_INCREASE_AMOUNT = 1; // Mass increase per 10 stars (whole number)
 
 // --- Player Tilt ---
 const PLAYER_TILT_FACTOR = 0.05; // How much to tilt based on X position
@@ -97,6 +100,7 @@ const EFFECTIVE_COLLISION_RING_WIDTH =
 // --- Game State ---
 let gameSpeed = BASE_GAME_SPEED;
 let score = 0;
+let totalStarsSpawned = 0; // Add counter for total stars spawned
 let lastSpeedIncreaseScore = 0;
 let blackHoleMass = INITIAL_BLACK_HOLE_MASS;
 let elapsedTime = 0;
@@ -109,6 +113,7 @@ const rivalBlackHoles: THREE.Mesh[] = [];
 let lastRivalSpawnScore = 0;
 let currentMaxRivals = INITIAL_RIVAL_BLACK_HOLE_COUNT; // Track current maximum number of rivals
 let damageOverlay: HTMLDivElement | null = null; // Track the damage overlay element
+let hasFirstRivalSpawned = false; // Track if the first rival has spawned
 
 // High Score Management
 const HIGH_SCORE_KEY = 'blackHoleGameHighScore';
@@ -170,6 +175,8 @@ uniform sampler2D uTexture;
 uniform float uIntensity;
 uniform vec3 uFlashColor;
 uniform float uFlashIntensity;
+uniform bool uIsRival; // New uniform
+uniform vec3 uRivalGlowColor; // New uniform (e.g., RIVAL_BLACK_HOLE_COLOR)
 
 float calculateLuminance(vec3 color) {
   return dot(color, vec3(0.2126, 0.7152, 0.0722));
@@ -181,8 +188,17 @@ void main() {
   vec3 baseColor = textureColor.rgb * uIntensity;
   baseColor += uFlashColor * uFlashIntensity;
 
+  // Add rival glow
+  if (uIsRival) {
+    float dist = length(vUv - vec2(0.5)); // Distance from center (0.0 to 0.5)
+    // Create a glow effect concentrated near the edge (adjust smoothstep values for thickness/falloff)
+    float glowAmount = smoothstep(0.35, 0.5, dist) * (1.0 - smoothstep(0.48, 0.5, dist));
+    baseColor += uRivalGlowColor * glowAmount * 1.5; // Adjust multiplier for glow brightness
+  }
+
   float brightness = calculateLuminance(textureColor.rgb);
-  float alpha = smoothstep(0.03, 0.25, brightness);
+  // Adjust alpha calculation slightly to account for potential glow brightness
+  float alpha = smoothstep(0.03, 0.3, brightness + (uIsRival ? 0.1 : 0.0));
 
   gl_FragColor = vec4(baseColor, alpha);
 
@@ -322,6 +338,8 @@ const blackHoleMaterial = new THREE.ShaderMaterial({
     uIntensity: { value: 1.15 },
     uFlashColor: { value: FLASH_COLOR },
     uFlashIntensity: { value: 0.0 },
+    uIsRival: { value: false }, // Player is not a rival
+    uRivalGlowColor: { value: new THREE.Color(0x000000) }, // No glow color for player
   },
   transparent: true,
   depthWrite: false,
@@ -740,13 +758,44 @@ function spawnStar() {
 
   scene.add(star);
   stars.push(star);
+  totalStarsSpawned++; // Increment total stars spawned counter
+  console.log(`Star ${totalStarsSpawned} spawned.`); // Log star spawn
+
+  // Ensure at least one rival can spawn after 15 stars
+  if (totalStarsSpawned >= 15 && currentMaxRivals < 1) {
+    console.log(`Star ${totalStarsSpawned}: Setting currentMaxRivals from 0 to 1.`);
+    currentMaxRivals = 1;
+  }
 
   // Check if we should spawn a rival black hole
-  if (score >= lastRivalSpawnScore + RIVAL_BLACK_HOLE_MIN_SPAWN_INTERVAL) {
-    const shouldSpawn = Math.random() < RIVAL_BLACK_HOLE_SPAWN_CHANCE;
-    if (shouldSpawn) {
-      spawnRivalBlackHole(star);
-      lastRivalSpawnScore = score;
+  if (totalStarsSpawned >= 15) {
+    console.log(
+      `Star ${totalStarsSpawned}: Checking rival spawn. hasFirstRivalSpawned: ${hasFirstRivalSpawned}, currentMaxRivals: ${currentMaxRivals}, rivals.length: ${rivalBlackHoles.length}`
+    );
+    if (!hasFirstRivalSpawned) {
+      console.log(`Star ${totalStarsSpawned}: Attempting to spawn FIRST rival.`);
+      spawnRivalBlackHole(star); // Attempt to spawn
+      // Check if spawn was successful (i.e., if a rival was actually added)
+      console.log(
+        `Star ${totalStarsSpawned}: After first spawn attempt. rivals.length: ${rivalBlackHoles.length}`
+      );
+      if (rivalBlackHoles.length > 0 && !hasFirstRivalSpawned) {
+        console.log(`Star ${totalStarsSpawned}: FIRST rival spawn SUCCESSFUL. Setting flag.`);
+        hasFirstRivalSpawned = true;
+        lastRivalSpawnScore = totalStarsSpawned;
+      } else if (!hasFirstRivalSpawned) {
+        console.warn(`Star ${totalStarsSpawned}: FIRST rival spawn FAILED or flag already set?.`);
+      }
+    } else if (totalStarsSpawned >= lastRivalSpawnScore + RIVAL_BLACK_HOLE_MIN_SPAWN_INTERVAL) {
+      console.log(`Star ${totalStarsSpawned}: Checking subsequent rival spawn interval.`);
+      // For subsequent rivals, use the spawn interval
+      const shouldSpawn = Math.random() < RIVAL_BLACK_HOLE_SPAWN_CHANCE;
+      console.log(`Star ${totalStarsSpawned}: Should spawn subsequent? ${shouldSpawn}`);
+      if (shouldSpawn) {
+        console.log(`Star ${totalStarsSpawned}: Attempting to spawn SUBSEQUENT rival.`);
+        spawnRivalBlackHole(star);
+        lastRivalSpawnScore = totalStarsSpawned;
+      }
     }
   }
 }
@@ -793,7 +842,15 @@ window.addEventListener('keyup', (event) => {
 
 // --- Rival Black Hole Spawning ---
 function spawnRivalBlackHole(star: THREE.Mesh) {
-  if (rivalBlackHoles.length >= currentMaxRivals) return;
+  console.log(
+    `spawnRivalBlackHole called. currentMaxRivals: ${currentMaxRivals}, rivalBlackHoles.length: ${rivalBlackHoles.length}`
+  );
+  if (rivalBlackHoles.length >= currentMaxRivals) {
+    console.warn(
+      `spawnRivalBlackHole: PREVENTED spawn because length (${rivalBlackHoles.length}) >= max (${currentMaxRivals})`
+    );
+    return; // Prevent spawn if limit reached
+  }
 
   // Create a consistent material for all rival black holes
   const rivalMaterial = new THREE.ShaderMaterial({
@@ -801,9 +858,11 @@ function spawnRivalBlackHole(star: THREE.Mesh) {
     fragmentShader: blackHoleFragmentShader,
     uniforms: {
       uTexture: { value: rivalBlackHoleTexture },
-      uIntensity: { value: 1.15 },
-      uFlashColor: { value: RIVAL_BLACK_HOLE_COLOR },
+      uIntensity: { value: 1.15 }, // Keep base intensity same as player for consistency
+      uFlashColor: { value: RIVAL_BLACK_HOLE_COLOR }, // Flash color remains red
       uFlashIntensity: { value: 0.0 },
+      uIsRival: { value: true }, // This IS a rival
+      uRivalGlowColor: { value: RIVAL_BLACK_HOLE_COLOR }, // Use the rival color for the glow
     },
     transparent: true,
     depthWrite: false,
@@ -847,6 +906,9 @@ function spawnRivalBlackHole(star: THREE.Mesh) {
 
   scene.add(rivalBlackHole);
   rivalBlackHoles.push(rivalBlackHole);
+  console.log(
+    `spawnRivalBlackHole: Rival successfully created and added. New length: ${rivalBlackHoles.length}`
+  );
 }
 
 // --- Game Over Function ---
@@ -881,6 +943,9 @@ function handleGameOver() {
   gameOverContainer.style.zIndex = '1000';
   gameOverContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
   gameOverContainer.style.padding = '40px';
+  if (isMobile) {
+    gameOverContainer.style.padding = '10px';
+  }
   gameOverContainer.style.borderRadius = '20px';
   gameOverContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
   gameOverContainer.style.boxShadow = '0 0 30px rgba(0, 0, 0, 0.5)';
@@ -888,45 +953,78 @@ function handleGameOver() {
   const gameOverText = document.createElement('div');
   gameOverText.textContent = 'GAME OVER';
   gameOverText.style.marginBottom = '20px';
+  // Make GAME OVER text smaller on mobile
+  if (isMobile) {
+    gameOverText.style.fontSize = '36px'; // Adjust size for mobile
+  }
 
   const scoreText = document.createElement('div');
   scoreText.textContent = `Final Score: ${score}`;
   scoreText.style.fontSize = '32px';
+  // Adjust score/high score text size on mobile
+  if (isMobile) {
+    scoreText.style.fontSize = '24px';
+  }
 
   const highScoreText = document.createElement('div');
   highScoreText.textContent = `Highest Score: ${highScore}`;
   highScoreText.style.fontSize = '32px';
   highScoreText.style.marginTop = '10px';
+  if (isMobile) {
+    highScoreText.style.fontSize = '24px';
+  }
 
   const massText = document.createElement('div');
   massText.textContent = `Your black hole was destroyed!`;
   massText.style.fontSize = '24px';
   massText.style.marginTop = '10px';
+  if (isMobile) {
+    massText.style.fontSize = '18px';
+  }
 
   const restartText = document.createElement('div');
   restartText.textContent = 'Press R to Restart';
   restartText.style.fontSize = '24px';
   restartText.style.marginTop = '20px';
+  if (isMobile) {
+    restartText.style.fontSize = '18px';
+  }
+
+  // Add a Restart Button
+  const restartButton = document.createElement('button');
+  restartButton.textContent = 'Restart Game';
+  restartButton.style.marginTop = '30px';
+  restartButton.style.padding = '15px 30px';
+  restartButton.style.fontSize = '20px';
+  restartButton.style.backgroundColor = '#add8e6';
+  restartButton.style.border = 'none';
+  restartButton.style.borderRadius = '8px';
+  restartButton.style.cursor = 'pointer';
+  restartButton.style.color = '#000000';
+  restartButton.style.transition = 'background-color 0.2s ease';
+
+  restartButton.addEventListener('mouseenter', () => {
+    restartButton.style.backgroundColor = '#ffffff';
+  });
+  restartButton.addEventListener('mouseleave', () => {
+    restartButton.style.backgroundColor = '#add8e6';
+  });
+  restartButton.addEventListener('click', () => {
+    window.location.reload();
+  });
 
   gameOverContainer.appendChild(gameOverText);
   gameOverContainer.appendChild(scoreText);
   gameOverContainer.appendChild(highScoreText);
   gameOverContainer.appendChild(massText);
-  gameOverContainer.appendChild(restartText);
+  gameOverContainer.appendChild(restartText); // Keep the 'Press R' text
+  gameOverContainer.appendChild(restartButton); // Add the button
   document.body.appendChild(gameOverContainer);
 
   // Show high score message if a new high score was achieved
   if (score === highScore && score > parseInt(localStorage.getItem(HIGH_SCORE_KEY) || '0')) {
     showHighScoreMessage();
   }
-
-  // Add restart handler
-  const restartHandler = (event: KeyboardEvent) => {
-    if (event.code === 'KeyR') {
-      window.location.reload();
-    }
-  };
-  window.addEventListener('keydown', restartHandler);
 }
 
 // --- Collision Detection ---
@@ -975,6 +1073,13 @@ function checkCollisions() {
   const minCollisionDistSq = minCollisionDist * minCollisionDist;
   const maxCollisionDist = blackHoleOuterRadius + starEffectiveRadius + COLLISION_PADDING;
   const maxCollisionDistSq = maxCollisionDist * maxCollisionDist;
+
+  // Define specific collision distance for player-rival interaction
+  const playerCollisionRadius = blackHoleOuterRadius; // Player's outer ring radius
+  const rivalCollisionRadius = blackHoleOuterRadius; // Rival BH has same size
+  const rivalMaxCollisionDist = playerCollisionRadius + rivalCollisionRadius + COLLISION_PADDING;
+  const rivalMaxCollisionDistSq = rivalMaxCollisionDist * rivalMaxCollisionDist; // Squared distance for efficiency
+
   const blackHoleZPlane = playerGroup.position.z;
 
   // Check star collisions
@@ -1045,7 +1150,10 @@ function checkCollisions() {
             if (newSpeed !== gameSpeed) {
               gameSpeed = newSpeed;
               lastSpeedIncreaseScore = score;
-              blackHoleMass += MASS_INCREASE_AMOUNT;
+              // Mass increase now happens every 10 stars
+              if (score % 10 === 0) {
+                blackHoleMass += MASS_INCREASE_AMOUNT;
+              }
 
               // Visual feedback for speed increase
               gsap.to(bloomPass, {
@@ -1131,8 +1239,8 @@ function checkCollisions() {
         const dyToRival = intersectY - playerY;
         const distanceSq = dxToRival * dxToRival + dyToRival * dyToRival;
 
-        // Check for collision with rival black hole
-        if (distanceSq <= maxCollisionDistSq * 1.2) {
+        // Check for collision with rival black hole using the specific rival distance and no multiplier
+        if (distanceSq <= rivalMaxCollisionDistSq) {
           // Play rival collision sound
           playSound(rivalCollisionSound);
 
@@ -1238,6 +1346,15 @@ const animate = () => {
     const halfVisibleHeight =
       Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z;
 
+    // Calculate the visible half-width at the player's Z-plane (z=0)
+    const halfVisibleWidth =
+      Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) *
+      camera.position.z *
+      (sizes.width / sizes.height);
+
+    // Calculate the out-of-bounds offset in game units (40 pixels)
+    const outOfBoundsOffset = 40 * ((2 * halfVisibleWidth) / sizes.width);
+
     if (isMobile) {
       // Map mouse Y from [-1 (bottom), 1 (top)] to [-new_bottom_bound, top_bound]
       const topBound = BLACK_HOLE_MOVEMENT_BOUNDS_Y; // Keep original top bound
@@ -1263,18 +1380,17 @@ const animate = () => {
       // Clamp targetY vertically to prevent going off-screen, ensuring the *entire*
       // black hole stays within the vertical bounds.
       const effectiveTopBound = topBound - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0;
-      const effectiveBottomBound = -newBottomBound; // Already calculated based on size
+      const effectiveBottomBound = -newBottomBound;
       targetY = Math.max(effectiveBottomBound, Math.min(effectiveTopBound, targetY));
     } else {
       // Original calculation for desktop
       targetY = mousePosition.y * BLACK_HOLE_MOVEMENT_BOUNDS_Y;
-      // Optional: Add vertical clamping for desktop if needed
-      // const effectiveBoundY = BLACK_HOLE_MOVEMENT_BOUNDS_Y - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0;
-      // targetY = Math.max(-effectiveBoundY, Math.min(effectiveBoundY, targetY));
     }
 
-    // Clamp horizontal movement accounting for black hole size
-    const effectiveBoundX = BLACK_HOLE_MOVEMENT_BOUNDS_X - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0;
+    // Clamp horizontal movement accounting for black hole size and out-of-bounds offset
+    const effectiveBoundX = isMobile
+      ? halfVisibleWidth - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0 + outOfBoundsOffset // Use screen width for mobile with offset
+      : BLACK_HOLE_MOVEMENT_BOUNDS_X - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0 + outOfBoundsOffset; // Use original bounds for desktop with offset
     targetX = Math.max(-effectiveBoundX, Math.min(effectiveBoundX, targetX));
 
     gsap.to(playerGroup.position, {
