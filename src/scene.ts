@@ -74,6 +74,7 @@ const MASS_INCREASE_AMOUNT = 1; // Mass increase per 10 stars (whole number)
 // --- Player Tilt ---
 const PLAYER_TILT_FACTOR = 0.05; // How much to tilt based on X position
 const MAX_PLAYER_TILT_ANGLE = Math.PI / 12; // Max tilt angle (15 degrees)
+const INITIAL_MOBILE_Y_RATIO = -0.4; // -1 is bottom, 1 is top. -0.4 is 30% from bottom.
 
 // --- Colors ---
 const FLASH_COLOR = new THREE.Color(0xadd8e6); // Light Blue Flash
@@ -114,6 +115,14 @@ let lastRivalSpawnScore = 0;
 let currentMaxRivals = INITIAL_RIVAL_BLACK_HOLE_COUNT; // Track current maximum number of rivals
 let damageOverlay: HTMLDivElement | null = null; // Track the damage overlay element
 let hasFirstRivalSpawned = false; // Track if the first rival has spawned
+
+// --- Joystick State ---
+let joystickBase: HTMLDivElement | null = null;
+let joystickStick: HTMLDivElement | null = null;
+let joystickActive = false;
+let joystickRadius = 60; // Half of the base size
+let joystickCenter = { x: 0, y: 0 };
+let currentTouchId: number | null = null;
 
 // High Score Management
 const HIGH_SCORE_KEY = 'blackHoleGameHighScore';
@@ -302,21 +311,131 @@ window.addEventListener('mousemove', (event) => {
   mousePosition.y = -(event.clientY / sizes.height) * 2 + 1;
 });
 
-// Add touch event listener
-window.addEventListener(
-  'touchmove',
-  (event) => {
-    // Prevent default touch behavior (like scrolling)
-    event.preventDefault();
+// Remove the old simple touchmove listener
+// window.addEventListener(
+//   'touchmove',
+//   (event) => {
+//     event.preventDefault(); // Prevent scrolling
+//     if (event.touches.length > 0) {
+//       const touch = event.touches[0];
+//       mousePosition.x = (touch.clientX / sizes.width) * 2 - 1;
+//       mousePosition.y = -(touch.clientY / sizes.height) * 2 + 1;
+//     }
+//   },
+//   { passive: false }
+// );
 
-    if (event.touches.length > 0) {
-      const touch = event.touches[0];
-      mousePosition.x = (touch.clientX / sizes.width) * 2 - 1;
-      mousePosition.y = -(touch.clientY / sizes.height) * 2 + 1;
+// --- Joystick Touch Handlers ---
+function handleTouchStart(event: TouchEvent) {
+  if (!isMobile || joystickActive) return; // Only handle first touch on mobile
+
+  event.preventDefault(); // Prevent default actions like scrolling or zooming
+
+  const touch = event.changedTouches[0];
+  currentTouchId = touch.identifier;
+  joystickCenter.x = touch.clientX;
+  joystickCenter.y = touch.clientY;
+
+  if (joystickBase && joystickStick) {
+    joystickBase.style.left = `${joystickCenter.x}px`;
+    joystickBase.style.top = `${joystickCenter.y}px`;
+    joystickBase.style.display = 'block';
+
+    joystickStick.style.left = `${joystickCenter.x}px`;
+    joystickStick.style.top = `${joystickCenter.y}px`;
+    joystickStick.style.display = 'block';
+  }
+  joystickActive = true;
+  // Set initial mouse position based on joystick center? Or keep it (0,0)? Let's keep (0,0) for now.
+  // mousePosition.set(0, 0);
+}
+
+function handleTouchMove(event: TouchEvent) {
+  if (!isMobile || !joystickActive) return;
+
+  event.preventDefault(); // Prevent scrolling during drag
+
+  let foundTouch = false;
+  for (let i = 0; i < event.changedTouches.length; i++) {
+    const touch = event.changedTouches[i];
+    if (touch.identifier === currentTouchId) {
+      foundTouch = true;
+      const currentX = touch.clientX;
+      const currentY = touch.clientY;
+
+      const deltaX = currentX - joystickCenter.x;
+      const deltaY = currentY - joystickCenter.y;
+
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+      let stickX = joystickCenter.x + deltaX;
+      let stickY = joystickCenter.y + deltaY;
+      let normalizedX = deltaX / joystickRadius;
+      let normalizedY = deltaY / joystickRadius; // Screen Y is downwards
+
+      if (distance > joystickRadius) {
+        // Clamp stick position to the edge of the base
+        const ratio = joystickRadius / distance;
+        stickX = joystickCenter.x + deltaX * ratio;
+        stickY = joystickCenter.y + deltaY * ratio;
+        normalizedX = (deltaX * ratio) / joystickRadius;
+        normalizedY = (deltaY * ratio) / joystickRadius;
+      }
+
+      // Update stick visual position
+      if (joystickStick) {
+        joystickStick.style.left = `${stickX}px`;
+        joystickStick.style.top = `${stickY}px`;
+      }
+
+      // Update mousePosition for black hole control
+      // Clamp normalized values to [-1, 1] just in case
+      mousePosition.x = Math.max(-1, Math.min(1, normalizedX));
+      // Invert Y-axis: screen down is positive, game world up is positive
+      mousePosition.y = Math.max(-1, Math.min(1, -normalizedY));
+
+      break; // Found the controlling touch, exit loop
     }
-  },
-  { passive: false }
-); // Use { passive: false } to allow preventDefault
+  }
+}
+
+function handleTouchEnd(event: TouchEvent) {
+  if (!isMobile || !joystickActive) return;
+
+  let touchEnded = false;
+  for (let i = 0; i < event.changedTouches.length; i++) {
+    if (event.changedTouches[i].identifier === currentTouchId) {
+      touchEnded = true;
+      break;
+    }
+  }
+
+  if (touchEnded) {
+    if (joystickBase && joystickStick) {
+      joystickBase.style.display = 'none';
+      joystickStick.style.display = 'none';
+    }
+    joystickActive = false;
+    currentTouchId = null;
+    // Reset mouse position to stop movement when touch ends
+    // Keep X at center, reset Y to initial mobile position
+    mousePosition.x = 0;
+    // Recalculate the normalized Y based on the initial ratio
+    // (This ensures it respects the current camera position/FOV if they were dynamic,
+    // though in this case camera.position.z is static)
+    const halfVisibleHeight =
+      Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z;
+    const initialPlayerY = INITIAL_MOBILE_Y_RATIO * halfVisibleHeight;
+    const initialNormalizedY = halfVisibleHeight !== 0 ? initialPlayerY / halfVisibleHeight : 0;
+    mousePosition.y = Math.max(-1, Math.min(1, initialNormalizedY));
+  }
+}
+
+// Add Joystick Listeners
+window.addEventListener('touchstart', handleTouchStart, { passive: false });
+window.addEventListener('touchmove', handleTouchMove, { passive: false });
+window.addEventListener('touchend', handleTouchEnd, { passive: false });
+window.addEventListener('touchcancel', handleTouchEnd, { passive: false }); // Also handle cancel
 
 // --- Game Objects ---
 const playerGroup = new THREE.Group();
@@ -348,6 +467,22 @@ const blackHoleMaterial = new THREE.ShaderMaterial({
 
 const blackHole = new THREE.Mesh(blackHoleGeometry, blackHoleMaterial);
 playerGroup.add(blackHole);
+
+// Set initial position for mobile (30% from bottom)
+if (isMobile) {
+  // const initialYRatio = -0.4; // Use the constant instead
+  // Calculate visible height at Z=0 for initial positioning
+  const halfVisibleHeightInitial =
+    Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z;
+  const initialPlayerY = INITIAL_MOBILE_Y_RATIO * halfVisibleHeightInitial;
+  playerGroup.position.y = initialPlayerY;
+
+  // Also set the initial mousePosition.y to match, avoiding a jump on first touch
+  // Map the world Y back to the normalized [-1, 1] range relative to VISIBLE height
+  mousePosition.y = halfVisibleHeightInitial !== 0 ? initialPlayerY / halfVisibleHeightInitial : 0;
+  // Clamp initial mousePosition.y just in case
+  mousePosition.y = Math.max(-1, Math.min(1, mousePosition.y));
+}
 
 // --- Starfield Particle System ---
 const particlesGeometry = new THREE.BufferGeometry();
@@ -915,6 +1050,22 @@ function spawnRivalBlackHole(star: THREE.Mesh) {
 function handleGameOver() {
   gameActive = false;
 
+  // --- Disable Joystick ---
+  if (isMobile) {
+    console.log('Game Over: Disabling joystick.');
+    if (joystickBase) joystickBase.style.display = 'none';
+    if (joystickStick) joystickStick.style.display = 'none';
+    window.removeEventListener('touchstart', handleTouchStart);
+    window.removeEventListener('touchmove', handleTouchMove);
+    window.removeEventListener('touchend', handleTouchEnd);
+    window.removeEventListener('touchcancel', handleTouchEnd);
+    joystickActive = false;
+    currentTouchId = null;
+    // Reset mouse position just in case
+    mousePosition.set(0, 0);
+  }
+  // --- End Disable Joystick ---
+
   // Play game over sound
   playSound(gameOverSound);
 
@@ -1337,66 +1488,63 @@ const animate = () => {
   if (gameActive) {
     const effectiveSpeed = gameSpeed * deltaTime;
 
-    // Update Player Position (with clamping)
-    let targetX = mousePosition.x * BLACK_HOLE_MOVEMENT_BOUNDS_X;
-    let targetY: number;
-
-    // Calculate the visible half-height at the player's Z-plane (z=0)
-    // This is needed for both mobile Y calculation and the offset
+    // --- Calculate Screen Bounds in World Coords (Needs to be done first!) ---
     const halfVisibleHeight =
       Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z;
+    const halfVisibleWidth = halfVisibleHeight * camera.aspect;
 
-    // Calculate the visible half-width at the player's Z-plane (z=0)
-    const halfVisibleWidth =
-      Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) *
-      camera.position.z *
-      (sizes.width / sizes.height);
-
-    // Calculate the out-of-bounds offset in game units (40 pixels)
-    const outOfBoundsOffset = 40 * ((2 * halfVisibleWidth) / sizes.width);
+    // --- Calculate Target Position ---
+    let targetX: number;
+    let targetY: number;
 
     if (isMobile) {
-      // Map mouse Y from [-1 (bottom), 1 (top)] to [-new_bottom_bound, top_bound]
-      const topBound = BLACK_HOLE_MOVEMENT_BOUNDS_Y; // Keep original top bound
-
-      // Calculate the desired bottom bound for the black hole's *center*
-      // so its bottom edge might be near the screen's bottom edge initially
-      // (We clamp later to ensure it stays fully visible)
-      const newBottomBound = halfVisibleHeight - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2;
-
-      // Perform linear mapping: targetY = a * mousePosition.y + b
-      // Where: -1 maps to -newBottomBound, and 1 maps to topBound
-      const a = (topBound + newBottomBound) / 2; // Slope
-      const b = (topBound - newBottomBound) / 2; // Y-intercept
-      let mappedY = a * mousePosition.y + b; // Calculate the mapped Y based on touch
-
-      // Calculate the offset corresponding to 20 pixels in game units
-      const pixelsToOffset = 40;
-      const yOffsetInGameUnits = pixelsToOffset * ((2 * halfVisibleHeight) / sizes.height);
-
-      // Apply the offset
-      targetY = mappedY + yOffsetInGameUnits;
-
-      // Clamp targetY vertically to prevent going off-screen, ensuring the *entire*
-      // black hole stays within the vertical bounds.
-      const effectiveTopBound = topBound - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0;
-      const effectiveBottomBound = -newBottomBound;
-      targetY = Math.max(effectiveBottomBound, Math.min(effectiveTopBound, targetY));
+      // Mobile: Map joystick [-1, 1] directly to visible screen bounds in world coords
+      targetX = mousePosition.x * halfVisibleWidth;
+      targetY = mousePosition.y * halfVisibleHeight;
     } else {
-      // Original calculation for desktop
+      // Desktop: Map mouse [-1, 1] to configured movement bounds
+      targetX = mousePosition.x * BLACK_HOLE_MOVEMENT_BOUNDS_X;
       targetY = mousePosition.y * BLACK_HOLE_MOVEMENT_BOUNDS_Y;
     }
 
-    // Clamp horizontal movement accounting for black hole size and out-of-bounds offset
-    const effectiveBoundX = isMobile
-      ? halfVisibleWidth - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0 + outOfBoundsOffset // Use screen width for mobile with offset
-      : BLACK_HOLE_MOVEMENT_BOUNDS_X - EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0 + outOfBoundsOffset; // Use original bounds for desktop with offset
-    targetX = Math.max(-effectiveBoundX, Math.min(effectiveBoundX, targetX));
+    // --- Apply Clamping ---
+    const blackHoleRadius = EFFECTIVE_BLACK_HOLE_PLANE_SIZE / 2.0;
 
+    // Calculate the world-space equivalent of 30px horizontal offset for mobile
+    const horizontalPixelOffset = 50; // Allow 30px overshoot
+    const worldOffsetX =
+      isMobile && sizes.width > 0
+        ? horizontalPixelOffset * ((2 * halfVisibleWidth) / sizes.width)
+        : 0; // No offset for desktop or if width is zero
+
+    // Horizontal clamping: Respect the minimum of configured bounds and screen width, plus offset
+    const clampBoundX = Math.min(
+      BLACK_HOLE_MOVEMENT_BOUNDS_X, // Configured game bound
+      halfVisibleWidth // Actual visible screen edge
+    );
+    targetX = Math.max(
+      -clampBoundX - worldOffsetX + blackHoleRadius, // Clamp left edge with offset
+      Math.min(clampBoundX + worldOffsetX - blackHoleRadius, targetX) // Clamp right edge with offset
+    );
+
+    // Vertical clamping: Respect the minimum of configured bounds and screen height
+    // Allow bottom edge to reach screen bottom (-halfVisibleHeight)
+    const clampBoundYTop = Math.min(
+      BLACK_HOLE_MOVEMENT_BOUNDS_Y, // Configured game bound
+      halfVisibleHeight // Actual visible screen top edge
+    );
+    const clampBoundYBottom = -halfVisibleHeight; // Screen bottom edge
+
+    targetY = Math.max(
+      clampBoundYBottom + blackHoleRadius, // Clamp bottom edge
+      Math.min(clampBoundYTop - blackHoleRadius, targetY) // Clamp top edge
+    );
+
+    // --- Animate to Target ---
     gsap.to(playerGroup.position, {
       x: targetX,
       y: targetY,
-      duration: 0.15,
+      duration: isMobile ? 0.2 : 0.15, // Increased mobile duration for smoother movement
       ease: 'power1.out',
       overwrite: true,
     });
@@ -1521,6 +1669,7 @@ const animate = () => {
 
 // --- Start Game ---
 createUI();
+setupJoystickUI(); // Call the joystick setup
 
 // Function to initialize audio after user interaction
 function initializeAudio() {
@@ -1600,6 +1749,10 @@ window.addEventListener('beforeunload', () => {
   if (blackHoleTexture) blackHoleTexture.dispose();
   if (rivalBlackHoleTexture) rivalBlackHoleTexture.dispose();
 
+  // Cleanup joystick elements
+  if (joystickBase) joystickBase.remove();
+  if (joystickStick) joystickStick.remove();
+
   // Cleanup rival black holes
   for (const rival of rivalBlackHoles) {
     if (rival.userData && rival.userData.warningBorder) {
@@ -1628,4 +1781,40 @@ function playSound(sound: HTMLAudioElement) {
       console.warn('Could not play sound:', error);
     });
   }
+}
+
+// Add Joystick UI Setup function
+function setupJoystickUI() {
+  if (!isMobile) return; // Only setup for mobile
+
+  const baseSize = 120;
+  joystickRadius = baseSize / 2; // Update radius based on actual size
+
+  joystickBase = document.createElement('div');
+  joystickBase.id = 'joystick-base';
+  joystickBase.style.position = 'fixed';
+  joystickBase.style.width = `${baseSize}px`;
+  joystickBase.style.height = `${baseSize}px`;
+  joystickBase.style.border = '2px solid rgba(255, 255, 255, 0.3)';
+  joystickBase.style.borderRadius = '50%';
+  joystickBase.style.display = 'none'; // Hidden initially
+  joystickBase.style.zIndex = '1005';
+  joystickBase.style.pointerEvents = 'none'; // Prevent blocking other UI
+  joystickBase.style.transform = 'translate(-50%, -50%)'; // Center on touch point
+  joystickBase.style.backdropFilter = 'blur(3px)'; // Add subtle blur
+
+  joystickStick = document.createElement('div');
+  joystickStick.id = 'joystick-stick';
+  joystickStick.style.position = 'fixed';
+  joystickStick.style.width = `${baseSize * 0.5}px`; // Stick is half the size
+  joystickStick.style.height = `${baseSize * 0.5}px`;
+  joystickStick.style.backgroundColor = 'rgba(255, 255, 255, 0.4)';
+  joystickStick.style.borderRadius = '50%';
+  joystickStick.style.display = 'none'; // Hidden initially
+  joystickStick.style.zIndex = '1006';
+  joystickStick.style.pointerEvents = 'none';
+  joystickStick.style.transform = 'translate(-50%, -50%)'; // Center on touch point
+
+  document.body.appendChild(joystickBase);
+  document.body.appendChild(joystickStick);
 }
