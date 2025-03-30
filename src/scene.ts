@@ -1,6 +1,4 @@
 // TODO:
-// + Add a "game over" screen with a "restart" button
-// + Create a controller for the black hole on mobile (similar to pieter's game)
 // - Add a "leaderboard" screen
 
 // --- IMPORTS (Keep all imports) ---
@@ -17,13 +15,22 @@ backgroundMusic.volume = 0.1; // Set initial volume to 30% to make room for soun
 
 // Sound effects
 const starCatchSound = new Audio('/star-catch.mp3');
-starCatchSound.volume = 0.1;
+starCatchSound.volume = 0.05; // Reduced from 0.1
 
 const rivalCollisionSound = new Audio('/rival-collision.mp3');
-rivalCollisionSound.volume = 0.3;
+rivalCollisionSound.volume = 0.15; // Reduced from 0.3
 
 const gameOverSound = new Audio('/game-over.mp3');
-gameOverSound.volume = 0.3;
+gameOverSound.volume = 0.15; // Reduced from 0.3
+
+// --- Load Sound State ---
+let soundEnabled = JSON.parse(localStorage.getItem('soundEnabled') ?? 'true'); // Default to true
+
+// --- Set Initial Volumes Based on Loaded State ---
+backgroundMusic.volume = soundEnabled ? 0.1 : 0;
+starCatchSound.volume = soundEnabled ? 0.05 : 0;
+rivalCollisionSound.volume = soundEnabled ? 0.15 : 0;
+gameOverSound.volume = soundEnabled ? 0.15 : 0;
 
 // --- CONFIGURATION (Keep all config constants) ---
 const PARTICLE_COUNT = 4000;
@@ -111,7 +118,7 @@ let elapsedTime = 0;
 let isSlowMo = false;
 let gameActive = true;
 let audioInitialized = false; // Flag to track if audio context is unlocked
-let soundEnabled = true; // Flag to track if sound is enabled
+// let soundEnabled = true; // Flag to track if sound is enabled -- REMOVED, loaded above
 const stars: THREE.Mesh[] = [];
 const rivalBlackHoles: THREE.Mesh[] = [];
 let lastRivalSpawnScore = 0;
@@ -406,8 +413,13 @@ function handleTouchMove(event: TouchEvent) {
       // Update mousePosition for black hole control
       // Clamp normalized values to [-1, 1] just in case
       mousePosition.x = Math.max(-1, Math.min(1, normalizedX));
-      // Invert Y-axis: screen down is positive, game world up is positive
-      mousePosition.y = Math.max(-1, Math.min(1, -normalizedY));
+
+      // Apply vertical scaling factor for slower up/down movement
+      const verticalScaleFactor = 0.4; // Adjust this value (0.0 to 1.0) to change sensitivity
+      const scaledNormalizedY = -normalizedY * verticalScaleFactor;
+
+      // Invert Y-axis and apply scaling: screen down is positive, game world up is positive
+      mousePosition.y = Math.max(-1, Math.min(1, scaledNormalizedY));
 
       break; // Found the controlling touch, exit loop
     }
@@ -670,8 +682,8 @@ function createUI() {
   soundMenuItem.className = 'menu-item';
   soundMenuItem.innerHTML = `
     <span style="margin-right: 10px;">🔊</span>
-    <span id="sound-text" style="color: #ffffff;">Sound: On</span>
-  `;
+    <span id="sound-text" style="color: #ffffff;">Sound: ${soundEnabled ? 'On' : 'Off'}</span>
+  `; // <-- Set initial text based on loaded state
   soundMenuItem.style.padding = '10px';
   soundMenuItem.style.cursor = 'pointer';
   soundMenuItem.style.transition = 'all 0.2s ease';
@@ -864,9 +876,10 @@ function createUI() {
 
     // Update audio volumes
     backgroundMusic.volume = soundEnabled ? 0.1 : 0;
-    starCatchSound.volume = soundEnabled ? 0.1 : 0;
-    rivalCollisionSound.volume = soundEnabled ? 0.3 : 0;
-    gameOverSound.volume = soundEnabled ? 0.3 : 0;
+    starCatchSound.volume = soundEnabled ? 0.05 : 0; // Update here too
+    rivalCollisionSound.volume = soundEnabled ? 0.15 : 0; // Update here too
+    gameOverSound.volume = soundEnabled ? 0.15 : 0; // Update here too
+    localStorage.setItem('soundEnabled', JSON.stringify(soundEnabled)); // <-- Save state here
   });
 
   // Handle How to Play click
@@ -1181,6 +1194,9 @@ function handleGameOver() {
 
   // Play game over sound
   playSound(gameOverSound);
+
+  // Pause background music
+  backgroundMusic.pause();
 
   // Create blurred backdrop
   const backdrop = document.createElement('div');
@@ -1767,10 +1783,12 @@ const animate = () => {
     }
 
     // Update Particles
-    particles.position.z += effectiveSpeed * 0.015;
+    particles.position.z += effectiveSpeed * 0.015; // <-- Restore this line
     if (particles.position.z > 30) {
-      particles.position.z -= PARTICLE_SPREAD + 50;
-    }
+      // <-- Restore this line
+      // Reset position to be behind the star spawn distance instead of very far back
+      particles.position.z = SPAWN_DISTANCE_Z - 10; // <-- Refined reset logic
+    } // <-- Restore this line
 
     // Check Collisions
     checkCollisions();
