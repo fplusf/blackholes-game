@@ -28,7 +28,8 @@ gameOverSound.volume = 0.3;
 // --- CONFIGURATION (Keep all config constants) ---
 const PARTICLE_COUNT = 4000;
 const PARTICLE_SPREAD = 90;
-const BLACK_HOLE_PLANE_SIZE = 3.0;
+const BLACK_HOLE_PLANE_SIZE = 2.8; // Player size
+const RIVAL_BLACK_HOLE_PLANE_SIZE = 2.0; // Rival size (smaller)
 const BLACK_HOLE_COLLISION_CENTER_RADIUS = 0.4;
 const BLACK_HOLE_COLLISION_RING_WIDTH = 0.2;
 const COLLISION_PADDING = 0.05;
@@ -90,6 +91,8 @@ const isMobile = window.innerWidth <= MOBILE_BREAKPOINT;
 
 const EFFECTIVE_BLACK_HOLE_PLANE_SIZE =
   BLACK_HOLE_PLANE_SIZE * (isMobile ? MOBILE_SCALE_FACTOR : 1);
+const EFFECTIVE_RIVAL_BLACK_HOLE_PLANE_SIZE =
+  RIVAL_BLACK_HOLE_PLANE_SIZE * (isMobile ? MOBILE_SCALE_FACTOR : 1); // Add effective rival size
 const EFFECTIVE_STAR_OUTER_RADIUS = STAR_OUTER_RADIUS * (isMobile ? MOBILE_SCALE_FACTOR : 1);
 const EFFECTIVE_STAR_INNER_RADIUS = STAR_INNER_RADIUS * (isMobile ? MOBILE_SCALE_FACTOR : 1);
 const EFFECTIVE_CUE_BORDER_BASE_SIZE = CUE_BORDER_BASE_SIZE * (isMobile ? MOBILE_SCALE_FACTOR : 1);
@@ -202,7 +205,7 @@ void main() {
     float dist = length(vUv - vec2(0.5)); // Distance from center (0.0 to 0.5)
     // Create a glow effect concentrated near the edge (adjust smoothstep values for thickness/falloff)
     float glowAmount = smoothstep(0.35, 0.5, dist) * (1.0 - smoothstep(0.48, 0.5, dist));
-    baseColor += uRivalGlowColor * glowAmount * 1.5; // Adjust multiplier for glow brightness
+    baseColor += uRivalGlowColor * glowAmount * 0.6; // Reduced multiplier further from 1.0 to 0.6
   }
 
   float brightness = calculateLuminance(textureColor.rgb);
@@ -355,11 +358,9 @@ function handleTouchMove(event: TouchEvent) {
 
   event.preventDefault(); // Prevent scrolling during drag
 
-  let foundTouch = false;
   for (let i = 0; i < event.changedTouches.length; i++) {
     const touch = event.changedTouches[i];
     if (touch.identifier === currentTouchId) {
-      foundTouch = true;
       const currentX = touch.clientX;
       const currentY = touch.clientY;
 
@@ -444,6 +445,14 @@ scene.add(playerGroup);
 const blackHoleGeometry = new THREE.PlaneGeometry(
   EFFECTIVE_BLACK_HOLE_PLANE_SIZE,
   EFFECTIVE_BLACK_HOLE_PLANE_SIZE,
+  32,
+  32
+);
+
+// Create separate geometry for rivals
+const rivalBlackHoleGeometry = new THREE.PlaneGeometry(
+  EFFECTIVE_RIVAL_BLACK_HOLE_PLANE_SIZE,
+  EFFECTIVE_RIVAL_BLACK_HOLE_PLANE_SIZE,
   32,
   32
 );
@@ -1004,7 +1013,7 @@ function spawnRivalBlackHole(star: THREE.Mesh) {
     side: THREE.DoubleSide,
   });
 
-  const rivalBlackHole = new THREE.Mesh(blackHoleGeometry, rivalMaterial);
+  const rivalBlackHole = new THREE.Mesh(rivalBlackHoleGeometry, rivalMaterial);
 
   // Spawn position near the star at the same Z distance
   const starPos = star.position;
@@ -1745,6 +1754,7 @@ window.addEventListener('beforeunload', () => {
   particlesGeometry.dispose();
   particlesMaterial.dispose();
   blackHoleGeometry.dispose();
+  rivalBlackHoleGeometry.dispose(); // Dispose rival geometry
   blackHoleMaterial.dispose();
   if (blackHoleTexture) blackHoleTexture.dispose();
   if (rivalBlackHoleTexture) rivalBlackHoleTexture.dispose();
