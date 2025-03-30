@@ -127,6 +127,11 @@ let joystickRadius = 60; // Half of the base size
 let joystickCenter = { x: 0, y: 0 };
 let currentTouchId: number | null = null;
 
+// --- UI Element References (Declared Globally) ---
+let menuContainer: HTMLDivElement | null = null;
+let pauseMenuItem: HTMLDivElement | null = null;
+let dialog: HTMLDivElement | null = null;
+
 // High Score Management
 const HIGH_SCORE_KEY = 'blackHoleGameHighScore';
 let highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) || '0');
@@ -332,9 +337,18 @@ window.addEventListener('mousemove', (event) => {
 function handleTouchStart(event: TouchEvent) {
   if (!isMobile || joystickActive) return; // Only handle first touch on mobile
 
+  const touch = event.changedTouches[0];
+
+  // --- NEW: Check if touch is too high (near menu) ---
+  const menuButtonSafeArea = 100; // Pixels from the top
+  if (touch.clientY < menuButtonSafeArea) {
+    console.log('Touch started in menu area, ignoring for joystick.');
+    return; // Don't activate joystick if touch is near the top
+  }
+  // --- END NEW ---
+
   event.preventDefault(); // Prevent default actions like scrolling or zooming
 
-  const touch = event.changedTouches[0];
   currentTouchId = touch.identifier;
   joystickCenter.x = touch.clientX;
   joystickCenter.y = touch.clientY;
@@ -624,17 +638,32 @@ function createUI() {
   menuButton.style.userSelect = 'none';
 
   // Create menu container
-  const menuContainer = document.createElement('div');
+  menuContainer = document.createElement('div'); // Assign to the global variable
   menuContainer.id = 'menu-container';
   menuContainer.style.position = 'fixed';
-  menuContainer.style.top = '70px';
-  menuContainer.style.left = '20px';
-  menuContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-  menuContainer.style.borderRadius = '10px';
-  menuContainer.style.padding = '10px';
+  menuContainer.style.top = '0'; // Full screen
+  menuContainer.style.left = '0'; // Full screen
+  menuContainer.style.width = '100%'; // Full screen
+  menuContainer.style.height = '100%'; // Full screen
+  menuContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.7)'; // Dark semi-transparent background
+  menuContainer.style.backdropFilter = 'blur(4px)'; // Blur effect
   menuContainer.style.zIndex = '1001';
-  menuContainer.style.display = 'none';
-  menuContainer.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.2)';
+  menuContainer.style.display = 'none'; // Hidden by default
+  menuContainer.style.flexDirection = 'column'; // Stack items vertically
+  menuContainer.style.alignItems = 'center'; // Center horizontally
+  menuContainer.style.justifyContent = 'center'; // Center vertically
+
+  // Create a wrapper for the menu content inside the modal
+  const menuContentWrapper = document.createElement('div');
+  menuContentWrapper.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
+  menuContentWrapper.style.padding = '30px';
+  menuContentWrapper.style.borderRadius = '15px';
+  menuContentWrapper.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.1)';
+  menuContentWrapper.style.display = 'flex';
+  menuContentWrapper.style.flexDirection = 'column';
+  menuContentWrapper.style.alignItems = 'stretch'; // Make items fill width
+  menuContentWrapper.style.gap = '15px'; // Add space between items
+  menuContentWrapper.style.minWidth = '250px'; // Ensure a minimum width
 
   // Create menu items
   const soundMenuItem = document.createElement('div');
@@ -663,13 +692,32 @@ function createUI() {
   howToPlayMenuItem.style.color = '#ffffff';
   howToPlayMenuItem.style.fontSize = '16px';
 
-  menuContainer.appendChild(soundMenuItem);
-  menuContainer.appendChild(howToPlayMenuItem);
+  pauseMenuItem = document.createElement('div'); // Assign to the global variable
+  pauseMenuItem.className = 'menu-item';
+  pauseMenuItem.innerHTML = `
+    <span style="margin-right: 10px;">⏸️</span>
+    <span id="pause-text" style="color: #ffffff;">Pause</span>
+  `;
+  pauseMenuItem.style.padding = '10px';
+  pauseMenuItem.style.cursor = 'pointer';
+  pauseMenuItem.style.transition = 'all 0.2s ease';
+  pauseMenuItem.style.borderRadius = '5px';
+  pauseMenuItem.style.color = '#ffffff';
+  pauseMenuItem.style.fontSize = '16px';
+
+  // Append items to the CONTENT WRAPPER in the desired order
+  menuContentWrapper.appendChild(pauseMenuItem);
+  menuContentWrapper.appendChild(soundMenuItem);
+  menuContentWrapper.appendChild(howToPlayMenuItem);
+
+  // Add the content wrapper to the main modal container
+  menuContainer.appendChild(menuContentWrapper);
+
   document.body.appendChild(menuContainer);
   document.body.appendChild(menuButton);
 
   // Create dialog for How to Play
-  const dialog = document.createElement('div');
+  dialog = document.createElement('div'); // Assign to the global variable
   dialog.style.position = 'fixed';
   dialog.style.top = '50%';
   dialog.style.left = '50%';
@@ -760,10 +808,51 @@ function createUI() {
     closeButton.style.backgroundColor = '#add8e6';
   });
 
-  // Handle menu toggle
+  // Add hover effects for Pause item
+  if (pauseMenuItem) {
+    // Added null check
+    pauseMenuItem.addEventListener('mouseenter', () => {
+      if (pauseMenuItem) {
+        // Added null check
+        pauseMenuItem.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
+        pauseMenuItem.style.color = '#add8e6';
+      }
+    });
+    pauseMenuItem.addEventListener('mouseleave', () => {
+      if (pauseMenuItem) {
+        // Added null check
+        pauseMenuItem.style.backgroundColor = 'transparent';
+        pauseMenuItem.style.color = '#ffffff';
+      }
+    });
+  }
+
+  // Handle menu toggle (Now controls the modal)
   menuButton.addEventListener('click', () => {
-    menuContainer.style.display = menuContainer.style.display === 'none' ? 'block' : 'none';
+    // This button ONLY opens the modal and pauses.
+    if (menuContainer && menuContainer.style.display === 'none') {
+      // Added null check for menuContainer
+      pauseGame(); // Call the refactored pause function
+    }
+    // Remove the 'else' block that previously handled resuming via the menu button
+    /* else {
+      // Resume game & hide modal (This path is being removed, only Resume button should close)
+    } */
   });
+
+  // --- NEW: Handle Pause/Resume Item Click ---
+  if (pauseMenuItem) {
+    // Added null check for pauseMenuItem
+    pauseMenuItem.addEventListener('click', () => {
+      // Only resume if the game is currently paused (menu is open)
+      if (!gameActive && menuContainer && menuContainer.style.display !== 'none') {
+        // Added null check for menuContainer
+        resumeGame(); // Call the refactored resume function
+      }
+      // Note: We don't need an 'else' here because pausing is handled by the menuButton opening the modal.
+    });
+  }
+  // --- END NEW ---
 
   // Handle sound toggle
   soundMenuItem.addEventListener('click', () => {
@@ -782,31 +871,46 @@ function createUI() {
 
   // Handle How to Play click
   howToPlayMenuItem.addEventListener('click', () => {
-    menuContainer.style.display = 'none';
-    dialog.style.display = 'block';
-    gameActive = false;
+    // menuContainer.style.display = 'none'; // Keep menu modal open
+    if (dialog) dialog.style.display = 'block'; // Added null check for dialog
+    // gameActive is already false because the menu is open
+    // gameActive = false;
   });
 
   // Handle dialog close
   closeButton.addEventListener('click', () => {
-    dialog.style.display = 'none';
-    gameActive = true;
+    if (dialog) dialog.style.display = 'none'; // Added null check for dialog
+    // Do NOT resume game here, return to the paused menu modal
+    // const pauseText = document.getElementById('pause-text');
+    // if (pauseText && pauseText.textContent === 'Pause') {
+    //   gameActive = true;
+    // }
   });
 
   // Close dialog when clicking outside
-  dialog.addEventListener('click', (e) => {
-    if (e.target === dialog) {
-      dialog.style.display = 'none';
-      gameActive = true;
-    }
-  });
+  if (dialog) {
+    // Added null check for dialog
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) {
+        if (dialog) dialog.style.display = 'none'; // Added null check for dialog
+        // Do NOT resume game here, return to the paused menu modal
+        // const pauseText = document.getElementById('pause-text');
+        // if (pauseText && pauseText.textContent === 'Pause') {
+        //   gameActive = true;
+        // }
+      }
+    });
+  }
 
-  // Close menu when clicking outside
-  document.addEventListener('click', (e) => {
-    if (!menuButton.contains(e.target as Node) && !menuContainer.contains(e.target as Node)) {
-      menuContainer.style.display = 'none';
-    }
-  });
+  // Remove the listener for closing menu by clicking outside
+  // document.addEventListener('click', (e) => {
+  //   if (!menuButton.contains(e.target as Node) && !menuContainer.contains(e.target as Node)) {
+  //     menuContainer.style.display = 'none';
+  //   }
+  // });
+
+  // Remove the separate pause overlay logic - it's handled by the menu modal now
+  // ... (Remove any code related to creating/showing/hiding `pausedOverlay`) ...
 
   // Add Media Query Styles
   const styleSheet = document.createElement('style');
@@ -1793,14 +1897,14 @@ function playSound(sound: HTMLAudioElement) {
   }
 }
 
-// Add Joystick UI Setup function
+// --- Joystick UI Setup function ---
 function setupJoystickUI() {
   if (!isMobile) return; // Only setup for mobile
 
   const baseSize = 120;
   joystickRadius = baseSize / 2; // Update radius based on actual size
 
-  joystickBase = document.createElement('div');
+  joystickBase = document.createElement('div'); // Assign to global variable
   joystickBase.id = 'joystick-base';
   joystickBase.style.position = 'fixed';
   joystickBase.style.width = `${baseSize}px`;
@@ -1813,7 +1917,7 @@ function setupJoystickUI() {
   joystickBase.style.transform = 'translate(-50%, -50%)'; // Center on touch point
   joystickBase.style.backdropFilter = 'blur(3px)'; // Add subtle blur
 
-  joystickStick = document.createElement('div');
+  joystickStick = document.createElement('div'); // Assign to global variable
   joystickStick.id = 'joystick-stick';
   joystickStick.style.position = 'fixed';
   joystickStick.style.width = `${baseSize * 0.5}px`; // Stick is half the size
@@ -1828,3 +1932,77 @@ function setupJoystickUI() {
   document.body.appendChild(joystickBase);
   document.body.appendChild(joystickStick);
 }
+
+// --- Refactored Pause Function ---
+function pauseGame() {
+  if (!gameActive) return; // Don't pause if already paused
+
+  console.log('Pausing game...');
+  gameActive = false;
+  backgroundMusic.pause();
+
+  const pauseText = document.getElementById('pause-text');
+  const pauseIcon = pauseMenuItem?.querySelector('span:first-child'); // Use optional chaining
+
+  if (pauseText) pauseText.textContent = 'Resume';
+  if (pauseIcon) pauseIcon.textContent = '▶️';
+  if (menuContainer) menuContainer.style.display = 'flex'; // Use optional chaining
+
+  // Disable Joystick on Pause
+  if (isMobile) {
+    console.log('Pause: Disabling joystick listeners.');
+    window.removeEventListener('touchstart', handleTouchStart);
+    window.removeEventListener('touchmove', handleTouchMove);
+    window.removeEventListener('touchend', handleTouchEnd);
+    window.removeEventListener('touchcancel', handleTouchEnd);
+    if (joystickBase) joystickBase.style.display = 'none';
+    if (joystickStick) joystickStick.style.display = 'none';
+    joystickActive = false;
+    currentTouchId = null;
+  }
+}
+
+// --- Refactored Resume Function ---
+function resumeGame() {
+  if (gameActive) return; // Don't resume if already active
+  if (!menuContainer || menuContainer.style.display === 'none') return; // Don't resume if menu isn't open
+
+  console.log('Resuming game...');
+  gameActive = true;
+  if (soundEnabled && audioInitialized) {
+    backgroundMusic.play().catch((e) => console.warn('Resume play failed:', e));
+  }
+
+  const pauseText = document.getElementById('pause-text');
+  const pauseIcon = pauseMenuItem?.querySelector('span:first-child'); // Use optional chaining
+
+  if (pauseText) pauseText.textContent = 'Pause';
+  if (pauseIcon) pauseIcon.textContent = '⏸️';
+  if (menuContainer) menuContainer.style.display = 'none'; // Use optional chaining
+
+  // Close the How to Play dialog if it's open when resuming
+  if (dialog && dialog.style.display !== 'none') {
+    dialog.style.display = 'none';
+  }
+
+  // Enable Joystick on Resume
+  if (isMobile) {
+    console.log('Resume: Enabling joystick listeners.');
+    joystickActive = false;
+    currentTouchId = null;
+    if (joystickBase) joystickBase.style.display = 'none';
+    if (joystickStick) joystickStick.style.display = 'none';
+    window.addEventListener('touchstart', handleTouchStart, { passive: false });
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+  }
+}
+
+// --- Visibility Change Handling ---
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && gameActive) {
+    console.log('Tab hidden, pausing game.');
+    pauseGame(); // Pause the game if the tab becomes hidden and game is active
+  }
+});
