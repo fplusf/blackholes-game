@@ -118,6 +118,7 @@ let elapsedTime = 0;
 let isSlowMo = false;
 let gameActive = true;
 let audioInitialized = false; // Flag to track if audio context is unlocked
+let consecutiveSkippedStars = 0; // Add counter for consecutive skipped stars
 // let soundEnabled = true; // Flag to track if sound is enabled -- REMOVED, loaded above
 const stars: THREE.Mesh[] = [];
 const rivalBlackHoles: THREE.Mesh[] = [];
@@ -757,6 +758,7 @@ function createUI() {
       <li>Hold SPACE for slow-motion to help with precise movements (Desktop only)</li>
       <li>Avoid rival black holes (red) - they reduce your mass</li>
       <li>Game ends if your mass reaches zero</li>
+      <li>If you skip 10 stars in a row, you lose 1 mass (if mass > 1)</li>
     </ul>
 
     <h3 style="color: #add8e6;">Tips:</h3>
@@ -764,6 +766,7 @@ function createUI() {
       <li>Watch for the transparent border around stars - it shows the collection zone</li>
       <li>As you collect more stars, the game speeds up</li>
       <li>More rival black holes appear as your score increases</li>
+      <li>Try to collect stars regularly to avoid mass penalties</li>
     </ul>
   `;
 
@@ -1741,6 +1744,43 @@ const animate = () => {
         const cueBorderToDispose = star.userData.cueBorder as THREE.LineSegments;
         scene.remove(star);
         stars.splice(i, 1);
+
+        // Check if star was skipped (passed the black hole without being collected)
+        if (currentZ > 0) {
+          // If star passed the black hole's Z position
+          consecutiveSkippedStars++;
+          if (consecutiveSkippedStars >= 10) {
+            // Apply mass penalty if mass is above 1
+            if (blackHoleMass > 1) {
+              blackHoleMass--;
+              // Visual feedback for mass loss
+              gsap.to(bloomPass, {
+                strength: ORIGINAL_BLOOM_STRENGTH * 1.3,
+                duration: 0.2,
+                yoyo: true,
+                repeat: 1,
+              });
+              // Red flash effect
+              gsap.killTweensOf(blackHoleMaterial.uniforms.uFlashColor);
+              blackHoleMaterial.uniforms.uFlashColor.value = DAMAGE_FLASH_COLOR;
+              blackHoleMaterial.uniforms.uFlashIntensity.value = FLASH_INTENSITY_MAX;
+              gsap.to(blackHoleMaterial.uniforms.uFlashIntensity, {
+                value: 0.0,
+                duration: FLASH_DURATION,
+                ease: 'power2.out',
+                onComplete: () => {
+                  blackHoleMaterial.uniforms.uFlashColor.value = FLASH_COLOR;
+                },
+              });
+              // Update UI
+              updateUI();
+            }
+            consecutiveSkippedStars = 0; // Reset counter after applying penalty
+          }
+        } else {
+          consecutiveSkippedStars = 0; // Reset counter if star was collected
+        }
+
         // Only spawn a new star if we're below the maximum number of stars
         if (stars.length < 3) {
           // Allow up to 3 stars at once
