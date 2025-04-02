@@ -114,7 +114,7 @@ let totalStarsSpawned = 0; // Add counter for total stars spawned
 let lastSpeedIncreaseScore = 0;
 let blackHoleMass = INITIAL_BLACK_HOLE_MASS;
 let elapsedTime = 0;
-let isSlowMo = false; // Keeping variable but will no longer use it
+// Removed unused isSlowMo variable
 let gameActive = true;
 let audioInitialized = false; // Flag to track if audio context is unlocked
 let consecutiveSkippedStars = 0; // Add counter for consecutive skipped stars

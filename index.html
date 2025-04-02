@@ -12,6 +12,9 @@
     <meta name="author" content="Black Hole" />
     <meta name="keywords" content="Black Hole, Game, Cosmos, VibeCoding, Three.js" />
     <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
     <title>Black Hole</title>
     <style>
       body {
@@ -28,5 +31,19 @@
   <body>
     <canvas id="webgl-canvas"></canvas>
     <script type="module" src="/src/scene.ts"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker
+            .register('/sw.js')
+            .then((registration) => {
+              console.log('Service Worker registered:', registration);
+            })
+            .catch((error) => {
+              console.log('Service Worker registration failed:', error);
+            });
+        });
+      }
+    </script>
   </body>
 </html>
