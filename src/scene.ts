@@ -46,7 +46,6 @@ const STAR_POINTS = 4;
 const BLACK_HOLE_MOVEMENT_BOUNDS_X = 7;
 const BLACK_HOLE_MOVEMENT_BOUNDS_Y = 3.5;
 const BASE_GAME_SPEED = 25.0;
-const SLOW_MO_FACTOR = 0.2;
 const SPEED_INCREASE_INTERVAL = 10;
 const SPEED_INCREASE_AMOUNT = 3.0;
 const MAX_GAME_SPEED = 45.0;
@@ -115,7 +114,7 @@ let totalStarsSpawned = 0; // Add counter for total stars spawned
 let lastSpeedIncreaseScore = 0;
 let blackHoleMass = INITIAL_BLACK_HOLE_MASS;
 let elapsedTime = 0;
-let isSlowMo = false;
+let isSlowMo = false; // Keeping variable but will no longer use it
 let gameActive = true;
 let audioInitialized = false; // Flag to track if audio context is unlocked
 let consecutiveSkippedStars = 0; // Add counter for consecutive skipped stars
@@ -755,7 +754,6 @@ function createUI() {
     <ul style="text-align: left;">
       <li>Move your black hole with the mouse/touch</li>
       <li>Collect stars to increase your mass and score</li>
-      <li>Hold SPACE for slow-motion to help with precise movements (Desktop only)</li>
       <li>Avoid rival black holes (red) - they reduce your mass</li>
       <li>Game ends if your mass reaches zero</li>
       <li>If you skip 10 stars in a row, you lose 1 mass (if mass > 1)</li>
@@ -1065,44 +1063,7 @@ function spawnStar() {
 }
 
 // --- Input Handling (Slow-motion) ---
-window.addEventListener('keydown', (event) => {
-  if (event.code === 'Space' && !isSlowMo && gameActive) {
-    isSlowMo = true;
-    gsap.to(
-      {},
-      {
-        duration: 0.2,
-        onUpdate: () => {
-          gameSpeed = BASE_GAME_SPEED * SLOW_MO_FACTOR;
-        },
-      }
-    );
-    gsap.to(bloomPass, {
-      strength: ORIGINAL_BLOOM_STRENGTH * 0.85,
-      duration: 0.2,
-    });
-  }
-});
-
-window.addEventListener('keyup', (event) => {
-  if (event.code === 'Space' && isSlowMo && gameActive) {
-    isSlowMo = false;
-    gsap.to(
-      {},
-      {
-        duration: 0.5,
-        ease: 'power1.out',
-        onUpdate: () => {
-          gameSpeed = BASE_GAME_SPEED;
-        },
-      }
-    );
-    gsap.to(bloomPass, {
-      strength: ORIGINAL_BLOOM_STRENGTH,
-      duration: 0.5,
-    });
-  }
-});
+// Removed slow-motion event listeners
 
 // --- Rival Black Hole Spawning ---
 function spawnRivalBlackHole(star: THREE.Mesh) {
@@ -1736,8 +1697,8 @@ const animate = () => {
       // Border Orientation
       cueBorder.rotation.z = -star.rotation.z;
 
-      // Rotate Star
-      star.rotation.z += deltaTime * (isSlowMo ? 0.1 : 0.5);
+      // Rotate Star - remove slow-mo effect
+      star.rotation.z += deltaTime * 0.5;
 
       // Cleanup Star
       if (currentZ > CLEANUP_DISTANCE_Z) {
@@ -1806,8 +1767,8 @@ const animate = () => {
       rival.position.addScaledVector(direction, rivalSpeed);
       const currentZ = rival.position.z;
 
-      // Rotate Rival Black Hole
-      rival.rotation.z += deltaTime * (isSlowMo ? 0.05 : 0.25);
+      // Rotate Rival Black Hole - remove slow-mo effect
+      rival.rotation.z += deltaTime * 0.25;
 
       // Cleanup Rival Black Hole
       if (currentZ > RIVAL_BLACK_HOLE_CLEANUP_Z) {
