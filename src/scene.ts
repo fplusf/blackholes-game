@@ -235,8 +235,9 @@ void main() {
 const textureLoader = new THREE.TextureLoader();
 let blackHoleTexture: THREE.Texture | null = null;
 let rivalBlackHoleTexture: THREE.Texture | null = null;
-const texturePath = '/textures/black-hole-texture.png'; // Verify path
-const rivalTexturePath = '/textures/rival-black-hole.png'; // New path for rival texture
+const BASE_URL = window.location.origin;
+const texturePath = `${BASE_URL}/textures/black-hole-texture.png`;
+const rivalTexturePath = `${BASE_URL}/textures/rival-black-hole.png`;
 
 // Load textures after material is created
 textureLoader.load(
